@@ -174,6 +174,11 @@ type Platform struct {
 	chatMemberCache        sync.Map          // chatID -> *chatMemberEntry
 	recalledMu             sync.Mutex
 	recalledMsgIDs         map[string]time.Time // message_id -> recall time, short TTL race guard
+	messageDispatchMu      sync.Mutex
+	messageDispatchTails   map[string]chan struct{} // session key -> last pending dispatch
+	forwardMergeMu         sync.Mutex
+	forwardMergePending    map[string]*pendingForwardMerge
+	forwardMergeWindow     time.Duration // opt-in; 0 disables forward + quoted-text coalescing
 	// Webhook mode fields (for Lark international version)
 	server       *http.Server
 	port         string
@@ -442,6 +447,17 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		}
 		imageBatchWindow = time.Duration(ms) * time.Millisecond
 	}
+	var forwardMergeWindow time.Duration
+	if raw, ok := opts["forward_merge_window_ms"]; ok {
+		ms, err := coerceMilliseconds(raw)
+		if err != nil {
+			return nil, fmt.Errorf("%s: invalid forward_merge_window_ms %v: %w", name, raw, err)
+		}
+		if ms < 0 || ms > 10000 {
+			return nil, fmt.Errorf("%s: forward_merge_window_ms must be between 0 and 10000, got %d", name, ms)
+		}
+		forwardMergeWindow = time.Duration(ms) * time.Millisecond
+	}
 
 	// resource_chunk_size_bytes: byte size for each Range request when chunked-
 	// downloading Feishu message resources (issue #1741). The larkim SDK does
@@ -516,6 +532,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		mentionMap:                 mentionMap,
 		imageBatch:                 make(map[string]*imageBatchEntry),
 		imageBatchWindow:           imageBatchWindow,
+		forwardMergeWindow:         forwardMergeWindow,
 		resourceDownloadHTTP:       &http.Client{Timeout: 60 * time.Second},
 		resourceChunkSize:          resourceChunkSize,
 		resourceMaxBytes:           defaultResourceMaxBytes,
@@ -1920,11 +1937,14 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 		parentID = stringValue(msg.RootId)
 	}
 
-	// Dispatch message handling asynchronously so the SDK event loop is not
-	// blocked by IO-heavy operations (image/audio download, handler HTTP calls).
-	// The dedup and old-message checks above remain synchronous to guarantee
-	// correctness before spawning the goroutine.
-	go p.dispatchMessageWithHistory(ctx, msgType, content, mentions, messageID, sessionKey, userID, chatID, rctx, parentID, createTimeMs, groupHistoryCtx)
+	// Reserve dispatch order before returning to the SDK. Slow forward lookups
+	// and media downloads must not let newer messages in this session reach the
+	// engine first, where they would make the earlier message appear stale.
+	p.enqueueFeishuMessage(feishuIncoming{
+		ctx: ctx, msgType: msgType, content: content, mentions: mentions,
+		messageID: messageID, sessionKey: sessionKey, userID: userID, chatID: chatID,
+		rctx: rctx, parentID: parentID, createTimeMs: createTimeMs, history: groupHistoryCtx,
+	})
 
 	return nil
 }
@@ -1946,6 +1966,12 @@ func (p *Platform) dispatchMessage(ctx context.Context, msgType, content string,
 }
 
 func (p *Platform) dispatchMessageWithHistory(ctx context.Context, msgType, content string, mentions []*larkim.MentionEvent, messageID, sessionKey, userID, chatID string, rctx replyContext, parentID string, createTimeMs int64, groupHistoryCtx groupHistoryContext) {
+	p.dispatchMessageWithHistoryTo(ctx, msgType, content, mentions, messageID, sessionKey, userID, chatID, rctx, parentID, createTimeMs, groupHistoryCtx, p.dispatchCoreMessage)
+}
+
+// deliver may capture a parsed forward while its explicit-reply merge window
+// is open. Parsing alone must not acknowledge or submit a separate agent turn.
+func (p *Platform) dispatchMessageWithHistoryTo(ctx context.Context, msgType, content string, mentions []*larkim.MentionEvent, messageID, sessionKey, userID, chatID string, rctx replyContext, parentID string, createTimeMs int64, groupHistoryCtx groupHistoryContext, deliver func(*core.Message)) {
 	if p.isMessageRecalled(messageID) {
 		slog.Debug(p.tag()+": recalled message ignored in async dispatch", "message_id", messageID)
 		return
@@ -1976,7 +2002,7 @@ func (p *Platform) dispatchMessageWithHistory(ctx context.Context, msgType, cont
 			msg.ExtraContent = joinFeishuExtraContent(historyText, msg.ExtraContent)
 			msg.OnAccepted = groupHistoryCtx.onAccepted
 		}
-		p.dispatchCoreMessage(msg)
+		deliver(msg)
 	}
 
 	switch msgType {
@@ -2619,6 +2645,7 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 		Data struct {
 			Items []struct {
 				MessageID string `json:"message_id"`
+				Deleted   bool   `json:"deleted"`
 				MsgType   string `json:"msg_type"`
 				ParentID  string `json:"parent_id"`
 				Sender    struct {
@@ -2637,17 +2664,24 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 		return nil
 	}
 
-	// Prefer the item matching the requested message ID. Get-message for a
-	// merge_forward root returns the root plus all sub-messages; Items[0] may
-	// be a child, which would make the quote look like a random sub-message.
-	item := resp.Data.Items[0]
-	for _, candidate := range resp.Data.Items {
+	// A merged-forward lookup returns the container AND its descendants.
+	// Select the requested message, not whichever item happens to be first.
+	itemIndex := -1
+	for i, candidate := range resp.Data.Items {
 		if candidate.MessageID == messageID {
-			item = candidate
+			itemIndex = i
 			break
 		}
 	}
-
+	// Tolerate single-message responses from older API fixtures/proxies that
+	// omit message_id; never substitute a different identified message.
+	if itemIndex < 0 && len(resp.Data.Items) == 1 && resp.Data.Items[0].MessageID == "" {
+		itemIndex = 0
+	}
+	if itemIndex < 0 || resp.Data.Items[itemIndex].Deleted {
+		return nil
+	}
+	item := resp.Data.Items[itemIndex]
 	content := item.Body.Content
 	// merge_forward body is a fixed placeholder ("Merged and Forwarded Message");
 	// real content lives in sub-messages and must be fetched separately.
@@ -2660,6 +2694,17 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 	var images []core.ImageAttachment
 	var files []quotedFileMeta
 	switch item.MsgType {
+	case "merge_forward":
+		// Reuse the already-fetched items, including nested forwards. Keep
+		// file metadata lazy so quoted forwards cannot bypass the dispatcher's
+		// @bot + same-sender file-download gate.
+		var forwardResp struct {
+			Data *larkim.GetMessageRespData `json:"data"`
+		}
+		if err := json.Unmarshal(apiResp.RawBody, &forwardResp); err != nil || forwardResp.Data == nil {
+			return nil
+		}
+		text, images, _ = p.renderMergeForward(messageID, forwardResp.Data.Items, &files)
 	case "text":
 		var textBody struct {
 			Text string `json:"text"`
@@ -2726,16 +2771,6 @@ func (p *Platform) fetchSingleMessage(ctx context.Context, messageID string) *ch
 		}
 	case "interactive":
 		text = extractInteractiveCardText(content)
-	case "merge_forward":
-		// Expanding the forward is required when the user replies to a
-		// merge_forward: the reply arrives with a newer create_time and can
-		// set the engine watermark before the async merge_forward dispatch
-		// finishes, causing the standalone forward event to be dropped as
-		// stale. Without this expansion the agent only sees "[merge_forward]".
-		text, images, _ = p.parseMergeForward(messageID)
-		if text == "" {
-			text = "[merge_forward]"
-		}
 	default:
 		text = fmt.Sprintf("[%s]", item.MsgType)
 	}
@@ -3230,11 +3265,20 @@ func (p *Platform) parseMergeForward(rootMessageID string) (string, []core.Image
 
 	items := resp.Data.Items
 	slog.Info(p.tag()+": merge_forward sub-messages fetched", "message_id", rootMessageID, "count", len(items))
+	return p.renderMergeForward(rootMessageID, items, nil)
+}
 
+// renderMergeForward shares expansion between directly received forwards
+// and quoted forwards. A non-nil quotedFiles collects metadata instead of
+// downloading file bytes; the caller applies the existing quote policy.
+func (p *Platform) renderMergeForward(rootMessageID string, items []*larkim.Message, quotedFiles *[]quotedFileMeta) (string, []core.ImageAttachment, []core.FileAttachment) {
 	// Build tree: group children by upper_message_id, collect sender IDs
 	childrenMap := make(map[string][]*larkim.Message)
 	senderIDs := make(map[string]struct{})
 	for _, item := range items {
+		if item == nil || (item.Deleted != nil && *item.Deleted) {
+			continue
+		}
 		if item.MessageId != nil && *item.MessageId == rootMessageID {
 			continue // skip root container
 		}
@@ -3262,7 +3306,7 @@ func (p *Platform) parseMergeForward(rootMessageID string) (string, []core.Image
 	var allFiles []core.FileAttachment
 	var sb strings.Builder
 	sb.WriteString("<forwarded_messages>\n")
-	p.formatMergeForwardTree(rootMessageID, childrenMap, nameMap, &sb, &allImages, &allFiles, 0)
+	p.formatMergeForwardTree(rootMessageID, rootMessageID, childrenMap, nameMap, &sb, &allImages, &allFiles, quotedFiles, 0)
 	sb.WriteString("</forwarded_messages>")
 
 	return sb.String(), allImages, allFiles
@@ -3279,7 +3323,10 @@ func replaceMentions(text string, mentions []*larkim.Mention) string {
 }
 
 // formatMergeForwardTree recursively formats the sub-message tree.
-func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[string][]*larkim.Message, nameMap map[string]string, sb *strings.Builder, images *[]core.ImageAttachment, files *[]core.FileAttachment, depth int) {
+// Keep the visible outer container ID separate from the traversal parent:
+// image resources are accessible through the container, while using a child
+// message ID can return 234003 (File not in msg). This also applies to post images.
+func (p *Platform) formatMergeForwardTree(parentID, resourceMessageID string, childrenMap map[string][]*larkim.Message, nameMap map[string]string, sb *strings.Builder, images *[]core.ImageAttachment, files *[]core.FileAttachment, quotedFiles *[]quotedFileMeta, depth int) {
 	if depth > 10 {
 		sb.WriteString(strings.Repeat("    ", depth) + "[nested forwarding truncated]\n")
 		return
@@ -3332,7 +3379,7 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 			}
 
 		case "post":
-			textParts, postImages := p.parsePostContent(msgID, content)
+			textParts, postImages := p.parsePostContent(resourceMessageID, content)
 			*images = append(*images, postImages...)
 			text := replaceMentions(strings.Join(textParts, "\n"), item.Mentions)
 			if text != "" {
@@ -3347,9 +3394,9 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 				ImageKey string `json:"image_key"`
 			}
 			if err := json.Unmarshal([]byte(content), &imgBody); err == nil && imgBody.ImageKey != "" {
-				imgData, mimeType, err := p.downloadImage(msgID, imgBody.ImageKey)
+				imgData, mimeType, err := p.downloadImage(resourceMessageID, imgBody.ImageKey)
 				if err != nil {
-					slog.Error(p.tag()+": download merge_forward image failed", "error", err)
+					slog.Error(p.tag()+": download merge_forward image failed", "error", err, "message_id", msgID, "resource_message_id", resourceMessageID)
 					sb.WriteString(fmt.Sprintf("%s[%s] %s: [image - download failed]\n", indent, ts, senderName))
 				} else {
 					*images = append(*images, core.ImageAttachment{MimeType: mimeType, Data: imgData})
@@ -3363,6 +3410,14 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 				FileName string `json:"file_name"`
 			}
 			if err := json.Unmarshal([]byte(content), &fileBody); err == nil && fileBody.FileKey != "" {
+				if quotedFiles != nil {
+					*quotedFiles = append(*quotedFiles, quotedFileMeta{
+						fileKey: fileBody.FileKey, fileName: fileBody.FileName,
+						messageID: msgID, senderID: senderID,
+					})
+					sb.WriteString(fmt.Sprintf("%s[%s] %s: [file: %s]\n", indent, ts, senderName, fileBody.FileName))
+					continue
+				}
 				fileData, err := p.downloadResource(msgID, fileBody.FileKey, "file")
 				if err != nil {
 					slog.Error(p.tag()+": download merge_forward file failed", "error", err)
@@ -3376,7 +3431,7 @@ func (p *Platform) formatMergeForwardTree(parentID string, childrenMap map[strin
 
 		case "merge_forward":
 			sb.WriteString(fmt.Sprintf("%s[%s] %s: [forwarded messages]\n", indent, ts, senderName))
-			p.formatMergeForwardTree(msgID, childrenMap, nameMap, sb, images, files, depth+1)
+			p.formatMergeForwardTree(msgID, resourceMessageID, childrenMap, nameMap, sb, images, files, quotedFiles, depth+1)
 
 		default:
 			sb.WriteString(fmt.Sprintf("%s[%s] %s: [%s message]\n", indent, ts, senderName, msgType))
@@ -5662,6 +5717,7 @@ func (p *Platform) Stop() error {
 		}
 	}
 	// Flush any pending image batches so buffered images aren't lost on shutdown.
+	p.flushForwardMerges()
 	p.flushImageBatches()
 	return nil
 }

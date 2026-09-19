@@ -151,6 +151,43 @@ func TestCUJ_A9_PsAndBtwSupplementRunningTask(t *testing.T) {
 // agent "replies" for each user prompt, without bringing up a real LLM.
 // ---------------------------------------------------------------------------
 
+// The adapter submits an instruction and its material as one Message. The
+// user sees one answer, can send an independent next turn, and sees both turns
+// (not a third material-only turn) in history. Platform coalescing itself is
+// tested at that adapter's real inbound-event boundary.
+func TestCUJ_A9_ComposedInputThenFollowupAndHistory(t *testing.T) {
+	env := newCUJEnv(t)
+	defer env.engine.Stop()
+	key := "test:alice"
+	env.engine.ReceiveMessage(env.plat, &Message{
+		SessionKey: key, Platform: "test", MessageID: "combined-reply", UserID: "alice",
+		Content: "summarize the disagreement", ExtraContent: "material from the referenced conversation",
+		ReplyCtx: "ctx-alice", UserMessageTimeMs: 2000,
+	})
+	session := env.activeSession(key)
+	env.waitFor("one visible answer and persisted combined turn", 2*time.Second, func() bool {
+		return env.sentContains("ok") && len(session.GetHistory(0)) == 2
+	})
+	env.userSends("alice", "independent followup")
+	env.waitFor("second turn persisted", 2*time.Second, func() bool {
+		return len(session.GetHistory(0)) == 4
+	})
+	env.plat.clearSent()
+	env.userSends("alice", "/history")
+	env.waitFor("history includes instruction and material", 2*time.Second, func() bool {
+		return env.sentContains("summarize the disagreement") && env.sentContains("material from the referenced conversation") && env.sentContains("independent followup")
+	})
+	users := 0
+	for _, entry := range session.GetHistory(0) {
+		if entry.Role == "user" {
+			users++
+		}
+	}
+	if users != 2 {
+		t.Fatalf("history contains %d user turns, want combined + followup", users)
+	}
+}
+
 // cujAgent is a controllable Agent that returns a configurable AgentSession
 // per StartSession call. Tests can mutate cujAgentSession.reply between
 // turns to simulate different agent responses.
