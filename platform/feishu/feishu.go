@@ -3415,7 +3415,7 @@ func (p *Platform) formatMergeForwardTree(parentID, resourceMessageID string, ch
 						fileKey: fileBody.FileKey, fileName: fileBody.FileName,
 						messageID: msgID, senderID: senderID,
 					})
-					sb.WriteString(fmt.Sprintf("%s[%s] %s: [file: %s]\n", indent, ts, senderName, fileBody.FileName))
+					fmt.Fprintf(sb, "%s[%s] %s: [file: %s]\n", indent, ts, senderName, fileBody.FileName)
 					continue
 				}
 				fileData, err := p.downloadResource(msgID, fileBody.FileKey, "file")
