@@ -1902,7 +1902,7 @@ func (p *Platform) resolveUserName(openID string) string {
 			UserIdType("open_id").
 			Build())
 	if err != nil {
-		slog.Debug(p.tag()+": resolve user name failed", "open_id", openID, "error", err)
+		slog.Warn(p.tag()+": resolve user name failed", "open_id", openID, "error", err)
 		return openID
 	}
 	if !resp.Success() || resp.Data == nil || resp.Data.User == nil || resp.Data.User.Name == nil {
@@ -1971,7 +1971,7 @@ func (p *Platform) resolveChatName(chatID string) string {
 	resp, err := p.client.Im.Chat.Get(ctx,
 		larkim.NewGetChatReqBuilder().ChatId(chatID).Build())
 	if err != nil {
-		slog.Debug(p.tag()+": resolve chat name failed", "chat_id", chatID, "error", err)
+		slog.Warn(p.tag()+": resolve chat name failed", "chat_id", chatID, "error", err)
 		return chatID
 	}
 	if !resp.Success() || resp.Data == nil {
