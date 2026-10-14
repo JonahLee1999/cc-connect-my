@@ -91,7 +91,9 @@ func TestInboundCoalesce_ImageThenText(t *testing.T) {
 	image.Images = []core.ImageAttachment{{Data: []byte("image")}}
 	p.dispatchCoreMessage(image)
 	p.dispatchCoreMessage(inboundTestMessage("text", "Explain this"))
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("got %d requests, want one", len(got))
 	}
@@ -111,7 +113,9 @@ func TestInboundCoalesce_CommandFlushesBeforeImmediateDispatch(t *testing.T) {
 	if (<-got).Content != "pending" || (<-got).Content != "/new" {
 		t.Fatal("command overtook pending text")
 	}
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInboundCoalesce_DifferentSendersAreNotCombined(t *testing.T) {
@@ -120,7 +124,9 @@ func TestInboundCoalesce_DifferentSendersAreNotCombined(t *testing.T) {
 	other := inboundTestMessage("other", "second sender")
 	other.UserID = "other-user"
 	p.dispatchCoreMessage(other)
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 2 || (<-got).Content != "first sender" || (<-got).Content != "second sender" {
 		t.Fatal("messages from different senders were mixed or reordered")
 	}
@@ -133,7 +139,9 @@ func TestInboundCoalesce_RecalledMemberIsExcluded(t *testing.T) {
 	image.Images = []core.ImageAttachment{{Data: []byte("image")}}
 	p.dispatchCoreMessage(image)
 	p.markMessageRecalled("recalled")
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 	if len(got) != 1 {
 		t.Fatalf("got %d requests, want one", len(got))
 	}
@@ -151,13 +159,17 @@ func TestInboundCoalesce_PermissionResponseIsImmediate(t *testing.T) {
 	if len(got) != 1 || !(<-got).IsPermissionResponse {
 		t.Fatal("permission response was delayed")
 	}
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestInboundCoalesce_StopInvalidatesPendingTimer(t *testing.T) {
 	p, got := newInboundTestPlatform(t, 20)
 	p.dispatchCoreMessage(inboundTestMessage("text", "pending"))
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 	time.Sleep(50 * time.Millisecond)
 	if len(got) != 1 {
 		t.Fatalf("shutdown and timer emitted %d requests, want one", len(got))
@@ -195,5 +207,7 @@ func TestInboundCoalesce_CommandCannotOvertakeTimerDelivery(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("command was not dispatched after the preceding batch")
 	}
-	p.Stop()
+	if err := p.Stop(); err != nil {
+		t.Fatal(err)
+	}
 }
