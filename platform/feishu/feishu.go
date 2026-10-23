@@ -154,6 +154,7 @@ type Platform struct {
 	threadDoneMarker string            // reply line that marks the thread root done (see mention_done.go)
 	threadDoneEmoji  string            // emoji added to the thread root for threadDoneMarker
 	doneRoots        sync.Map          // thread root message_id -> true once marked done
+	skippedHistory   *skippedHistory   // nil = skipped messages are not shared later (see skipped_history.go)
 	chatMemberCache  sync.Map          // chatID -> *chatMemberEntry
 	recalledMu       sync.Mutex
 	recalledMsgIDs   map[string]time.Time // message_id -> recall time, short TTL race guard
@@ -407,6 +408,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		mentionInCard:              optBool(opts, "mention_in_card"),
 		threadDoneMarker:           optString(opts, "thread_done_marker"),
 		threadDoneEmoji:            optString(opts, "thread_done_emoji"),
+		skippedHistory:             newSkippedHistory(opts),
 		allowFrom:                  allowFrom,
 		allowChat:                  allowChat,
 		groupOnly:                  groupOnly,
@@ -1115,8 +1117,10 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) {
 		return
 	}
 	if !p.passesMessageFilter(msg) {
+		p.skippedHistory.remember(msg)
 		return
 	}
+	p.attachSkippedHistory(msg)
 	h(p.dispatchPlatform(), msg)
 }
 
