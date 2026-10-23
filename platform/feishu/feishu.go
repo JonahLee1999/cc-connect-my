@@ -147,6 +147,8 @@ type Platform struct {
 	mentionMap       map[string]string // agent name -> open_id (for outbound @ resolution)
 	userNameCache    sync.Map          // open_id -> display name
 	chatNameCache    sync.Map          // chat_id -> chat name
+	chatModeCache    sync.Map          // chat_id -> chat_mode (group/topic/p2p), reaction approvals
+	reactionApproval *reactionApproval // nil = reaction approvals disabled (see reaction_input.go)
 	chatMemberCache  sync.Map          // chatID -> *chatMemberEntry
 	recalledMu       sync.Mutex
 	recalledMsgIDs   map[string]time.Time // message_id -> recall time, short TTL race guard
@@ -395,6 +397,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		useInteractiveCard:         useInteractiveCard,
 		reactionEmoji:              reactionEmoji,
 		doneEmoji:                  doneEmoji,
+		reactionApproval:           newReactionApproval(opts),
 		allowFrom:                  allowFrom,
 		allowChat:                  allowChat,
 		groupOnly:                  groupOnly,
@@ -532,7 +535,14 @@ func (p *Platform) Start(handler core.MessageHandler) error {
 			return nil
 		}).
 		OnP2MessageReactionCreatedV1(func(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
-			return nil // ignore reaction events (triggered by our own addReaction)
+			// Our own addReaction events are dropped inside onReactionCreated (operator_type=app).
+			// User reactions may be routed as approvals when reaction_approvers is configured.
+			for _, sibling := range p.sharedGroup.allPlatforms() {
+				if err := sibling.onReactionCreated(ctx, event); err != nil {
+					slog.Error("shared ws: onReactionCreated error", "err", err)
+				}
+			}
+			return nil
 		}).
 		OnP2MessageReactionDeletedV1(func(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
 			return nil // ignore reaction removal events (triggered by our own removeReaction)
