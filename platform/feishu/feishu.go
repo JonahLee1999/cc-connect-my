@@ -149,6 +149,7 @@ type Platform struct {
 	chatNameCache    sync.Map          // chat_id -> chat name
 	chatModeCache    sync.Map          // chat_id -> chat_mode (group/topic/p2p), reaction approvals
 	reactionApproval *reactionApproval // nil = reaction approvals disabled (see reaction_input.go)
+	messageFilter    *messageFilter    // nil = no external message filter (see message_filter.go)
 	chatMemberCache  sync.Map          // chatID -> *chatMemberEntry
 	recalledMu       sync.Mutex
 	recalledMsgIDs   map[string]time.Time // message_id -> recall time, short TTL race guard
@@ -398,6 +399,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		reactionEmoji:              reactionEmoji,
 		doneEmoji:                  doneEmoji,
 		reactionApproval:           newReactionApproval(opts),
+		messageFilter:              newMessageFilter(opts),
 		allowFrom:                  allowFrom,
 		allowChat:                  allowChat,
 		groupOnly:                  groupOnly,
@@ -1103,6 +1105,9 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) {
 	p.populateWorkspaceChannelKeys(msg)
 	if p.isMessageRecalled(msg.MessageID) {
 		slog.Debug(p.tag()+": recalled message dispatch dropped", "message_id", msg.MessageID)
+		return
+	}
+	if !p.passesMessageFilter(msg) {
 		return
 	}
 	h(p.dispatchPlatform(), msg)
