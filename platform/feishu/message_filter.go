@@ -135,6 +135,9 @@ func (p *Platform) passesMessageFilter(msg *core.Message) bool {
 	if f == nil || msg == nil || strings.HasPrefix(msg.Content, ReactionApprovalMarker) {
 		return true
 	}
+	if rc, ok := msg.ReplyCtx.(replyContext); ok && rc.fromCardAction {
+		return true // explicit button clicks (permission answers, options) are never filtered
+	}
 	start := time.Now()
 	ok, reason := f.allow(p.platformName, msg)
 	elapsed := time.Since(start)

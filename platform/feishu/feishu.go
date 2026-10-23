@@ -113,6 +113,7 @@ type replyContext struct {
 	bootstrapThread  bool
 	receiptEmoji     string // persistent reaction owned by the accepted-message callback
 	receiptMessageID string
+	fromCardAction   bool // set for card button clicks; they bypass message_filter_cmd and chat context
 }
 
 type Platform struct {
@@ -1270,6 +1271,10 @@ func isMessageWithdrawnError(err error) bool {
 // recover. The callback has already been answered when it runs, so Feishu will
 // not redeliver the action.
 func (p *Platform) dispatchCardActionMessage(chatID string, msg *core.Message) {
+	if rc, ok := msg.ReplyCtx.(replyContext); ok {
+		rc.fromCardAction = true
+		msg.ReplyCtx = rc
+	}
 	go func() {
 		msg.UserName = p.resolveUserName(msg.UserID)
 		msg.ChatName = p.resolveChatName(chatID)

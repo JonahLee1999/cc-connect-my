@@ -82,3 +82,18 @@ func TestPassesMessageFilterBypassesReactionApprovals(t *testing.T) {
 		t.Fatal("no filter configured must pass")
 	}
 }
+
+func TestPassesMessageFilterBypassesCardActions(t *testing.T) {
+	p := &Platform{platformName: "feishu", messageFilter: newMessageFilter(map[string]any{
+		"message_filter_cmd": writeFilterScript(t, `echo '{"action":"skip"}'`)})}
+	click := &core.Message{SessionKey: "feishu:oc_1:root:om_r", MessageID: "om_card", Content: "allow",
+		ReplyCtx: replyContext{chatID: "oc_1", fromCardAction: true}}
+	if !p.passesMessageFilter(click) {
+		t.Fatal("card button clicks must bypass the message filter")
+	}
+	c := newChatContext(map[string]any{"chat_history_share": true})
+	c.record(click, false)
+	if len(c.byChat["oc_1"]) != 0 {
+		t.Fatal("card button clicks must not be recorded as group context")
+	}
+}

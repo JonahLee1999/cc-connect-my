@@ -111,6 +111,9 @@ func (c *chatContext) record(msg *core.Message, skipped bool) {
 	if c == nil || msg == nil || strings.HasPrefix(msg.Content, ReactionApprovalMarker) {
 		return
 	}
+	if rc, ok := msg.ReplyCtx.(replyContext); ok && rc.fromCardAction {
+		return // button clicks ("allow", option values) are not group conversation
+	}
 	chatID, rootID, ok := threadParts(msg.SessionKey)
 	if !ok {
 		return
