@@ -150,6 +150,10 @@ type Platform struct {
 	chatModeCache    sync.Map          // chat_id -> chat_mode (group/topic/p2p), reaction approvals
 	reactionApproval *reactionApproval // nil = reaction approvals disabled (see reaction_input.go)
 	messageFilter    *messageFilter    // nil = no external message filter (see message_filter.go)
+	mentionInCard    bool              // send replies with mentions+markdown as cards (see mention_done.go)
+	threadDoneMarker string            // reply line that marks the thread root done (see mention_done.go)
+	threadDoneEmoji  string            // emoji added to the thread root for threadDoneMarker
+	doneRoots        sync.Map          // thread root message_id -> true once marked done
 	chatMemberCache  sync.Map          // chatID -> *chatMemberEntry
 	recalledMu       sync.Mutex
 	recalledMsgIDs   map[string]time.Time // message_id -> recall time, short TTL race guard
@@ -400,6 +404,9 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		doneEmoji:                  doneEmoji,
 		reactionApproval:           newReactionApproval(opts),
 		messageFilter:              newMessageFilter(opts),
+		mentionInCard:              optBool(opts, "mention_in_card"),
+		threadDoneMarker:           optString(opts, "thread_done_marker"),
+		threadDoneEmoji:            optString(opts, "thread_done_emoji"),
 		allowFrom:                  allowFrom,
 		allowChat:                  allowChat,
 		groupOnly:                  groupOnly,
@@ -2826,9 +2833,16 @@ func (p *Platform) Reply(ctx context.Context, rctx any, content string) error {
 	if !ok {
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
+	if stripped, done := p.takeDoneMarker(content); done {
+		err := p.Reply(ctx, rctx, stripped)
+		if err == nil {
+			go p.markThreadRootDone(rc.sessionKey)
+		}
+		return err
+	}
 
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
-	msgType, msgBody := buildReplyContent(content)
+	msgType, msgBody := p.buildReplyContentFor(content)
 
 	if !p.shouldUseThreadOrReplyAPI(rc) {
 		return p.sendNewMessageToChat(ctx, rc, msgType, msgBody)
@@ -2844,13 +2858,20 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 	if !ok {
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
 	}
+	if stripped, done := p.takeDoneMarker(content); done {
+		err := p.Send(ctx, rctx, stripped)
+		if err == nil {
+			go p.markThreadRootDone(rc.sessionKey)
+		}
+		return err
+	}
 
 	if p.shouldUseThreadOrReplyAPI(rc) {
 		return p.Reply(ctx, rctx, content)
 	}
 
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
-	msgType, msgBody := buildReplyContent(content)
+	msgType, msgBody := p.buildReplyContentFor(content)
 	return p.sendNewMessageToChat(ctx, rc, msgType, msgBody)
 }
 
@@ -2864,6 +2885,13 @@ func (p *Platform) SendWithStatusFooter(ctx context.Context, rctx any, content, 
 	rc, ok := rctx.(replyContext)
 	if !ok {
 		return fmt.Errorf("%s: invalid reply context type %T", p.tag(), rctx)
+	}
+	if stripped, done := p.takeDoneMarker(content); done {
+		err := p.SendWithStatusFooter(ctx, rctx, stripped, footer)
+		if err == nil {
+			go p.markThreadRootDone(rc.sessionKey)
+		}
+		return err
 	}
 	// Resolve mentions first so we can detect whether a real @mention is
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
@@ -4499,6 +4527,7 @@ func buildPreviewCardJSON(content string) string {
 // cardID stays empty in that case and the engine routes EventText through the
 // full-card Patch path (= original #657 behavior, no typewriter).
 func (p *Platform) SendPreviewStart(ctx context.Context, rctx any, content string) (any, error) {
+	content = p.stripDoneMarker(content)
 	if !p.useInteractiveCard {
 		return nil, core.ErrNotSupported
 	}
@@ -4650,6 +4679,7 @@ func (p *Platform) createCardEntity(ctx context.Context, cardJSON string) (strin
 // via the inline-card-JSON fallback path; engine should fall back to full-card
 // Patch).
 func (p *Platform) StreamRichCardText(ctx context.Context, previewHandle any, fullText string) error {
+	fullText = p.stripDoneMarker(fullText)
 	h, ok := previewHandle.(*feishuPreviewHandle)
 	if !ok {
 		return fmt.Errorf("%s: StreamRichCardText: invalid preview handle type %T", p.tag(), previewHandle)
@@ -4705,6 +4735,7 @@ func (p *Platform) StreamRichCardText(ctx context.Context, previewHandle any, fu
 // UpdateMessage edits an existing card message identified by previewHandle.
 // Uses the Patch API (HTTP PATCH) which is required for interactive card messages.
 func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content string) error {
+	content = p.stripDoneMarker(content)
 	if !p.useInteractiveCard {
 		return core.ErrNotSupported
 	}
@@ -4747,6 +4778,7 @@ func (p *Platform) UpdateMessage(ctx context.Context, previewHandle any, content
 // block (Lark `text_size: "notation"`). Falls through to UpdateMessage when
 // the footer is empty.
 func (p *Platform) UpdateMessageWithStatusFooter(ctx context.Context, previewHandle any, content, footer string) error {
+	content = p.stripDoneMarker(content)
 	if !p.useInteractiveCard {
 		return core.ErrNotSupported
 	}
