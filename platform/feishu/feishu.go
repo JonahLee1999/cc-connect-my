@@ -163,6 +163,7 @@ type Platform struct {
 	mentionMap             map[string]string // agent name -> open_id (for outbound @ resolution)
 	userNameCache          sync.Map          // open_id -> display name
 	chatNameCache          sync.Map          // chat_id -> chat name
+	messageFilter          *messageFilter    // nil = no external message filter (see message_filter.go)
 	chatModeCache          sync.Map          // chat_id -> chat_mode (group/topic/p2p), reaction approvals
 	reactionApproval       *reactionApproval // nil = reaction approvals disabled (see reaction_input.go)
 	chatMemberCache        sync.Map          // chatID -> *chatMemberEntry
@@ -485,6 +486,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		ackEmoji:                   ackEmoji,
 		doneEmoji:                  doneEmoji,
 		reactionApproval:           newReactionApproval(opts),
+		messageFilter:              newMessageFilter(opts),
 		allowFrom:                  allowFrom,
 		allowChat:                  allowChat,
 		groupOnly:                  groupOnly,
@@ -1229,6 +1231,10 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) {
 	p.populateWorkspaceChannelKeys(msg)
 	if p.isMessageRecalled(msg.MessageID) {
 		slog.Debug(p.tag()+": recalled message dispatch dropped", "message_id", msg.MessageID)
+		return
+	}
+	// Filter first: skipped messages must not get a receipt reaction either.
+	if !p.passesMessageFilter(msg) {
 		return
 	}
 	p.prepareReceiptAcknowledgement(msg)
