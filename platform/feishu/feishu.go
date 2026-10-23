@@ -163,7 +163,7 @@ type Platform struct {
 	mentionMap             map[string]string // agent name -> open_id (for outbound @ resolution)
 	userNameCache          sync.Map          // open_id -> display name
 	chatNameCache          sync.Map          // chat_id -> chat name
-	skippedHistory         *skippedHistory   // nil = skipped messages are not shared later (see skipped_history.go)
+	chatContext            *chatContext      // nil = no group context sharing (see chat_context.go)
 	mentionInCard          bool              // send replies with mentions+markdown as cards (see mention_done.go)
 	threadDoneMarker       string            // reply line that marks the thread root done (see mention_done.go)
 	threadDoneEmoji        string            // emoji added to the thread root for threadDoneMarker
@@ -495,7 +495,7 @@ func newPlatform(name, domain string, opts map[string]any) (core.Platform, error
 		mentionInCard:              optBool(opts, "mention_in_card"),
 		threadDoneMarker:           optString(opts, "thread_done_marker"),
 		threadDoneEmoji:            optString(opts, "thread_done_emoji"),
-		skippedHistory:             newSkippedHistory(opts),
+		chatContext:                newChatContext(opts),
 		allowFrom:                  allowFrom,
 		allowChat:                  allowChat,
 		groupOnly:                  groupOnly,
@@ -1243,11 +1243,12 @@ func (p *Platform) dispatchCoreMessage(msg *core.Message) {
 		return
 	}
 	// Filter first: skipped messages must not get a receipt reaction either.
-	if !p.passesMessageFilter(msg) {
-		p.skippedHistory.remember(msg)
+	pass := p.passesMessageFilter(msg)
+	p.chatContext.record(msg, !pass)
+	if !pass {
 		return
 	}
-	p.attachSkippedHistory(msg)
+	p.attachChatContext(msg)
 	p.prepareReceiptAcknowledgement(msg)
 	h(p.dispatchPlatform(), msg)
 }
