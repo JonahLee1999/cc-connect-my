@@ -67,8 +67,11 @@ func TestBuildCardJSONWithGreyFooter(t *testing.T) {
 		t.Fatal(err)
 	}
 	els := card.Body.Elements
-	if len(els) != 3 || els[0]["tag"] != "markdown" {
-		t.Fatalf("want markdown + 2 footer lines, got %v", els)
+	if len(els) != 2 || els[0]["tag"] != "markdown" {
+		t.Fatalf("want markdown + one footer block, got %v", els)
+	}
+	if got := els[1]["text"].(map[string]any)["content"]; got != "model · ctx 4%\nJev p=0.9 · 0.6s" {
+		t.Fatalf("footer lines must be joined without blank lines, got %q", got)
 	}
 	for _, e := range els[1:] {
 		if e["tag"] != "div" {

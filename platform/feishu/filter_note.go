@@ -75,26 +75,30 @@ func (p *Platform) sendWithFooterCard(ctx context.Context, rc replyContext, cont
 // workspace, filter note): Lark's smallest preset, 10px.
 const footerTextSize = "x-small"
 
-// greyFooterElements renders each non-empty footer line as small grey plain
-// text, so all card footers (context/token status, workspace hint, filter
-// note) share one dim metadata style without a divider.
+// greyFooterElements renders the footer as one block of small grey plain
+// text (one line per non-empty footer line), so all card footers
+// (context/token status, workspace hint, filter note) share one dim metadata
+// style without a divider. A single element keeps normal line spacing; one
+// element per line would add Lark's inter-component gap between lines.
 func greyFooterElements(footer string) []map[string]any {
-	var elements []map[string]any
+	var lines []string
 	for _, line := range strings.Split(footer, "\n") {
-		if line = strings.TrimSpace(line); line == "" {
-			continue
+		if line = strings.TrimSpace(line); line != "" {
+			lines = append(lines, line)
 		}
-		elements = append(elements, map[string]any{
-			"tag": "div",
-			"text": map[string]any{
-				"tag":        "plain_text",
-				"content":    line,
-				"text_size":  footerTextSize,
-				"text_color": "grey",
-			},
-		})
 	}
-	return elements
+	if len(lines) == 0 {
+		return nil
+	}
+	return []map[string]any{{
+		"tag": "div",
+		"text": map[string]any{
+			"tag":        "plain_text",
+			"content":    strings.Join(lines, "\n"),
+			"text_size":  footerTextSize,
+			"text_color": "grey",
+		},
+	}}
 }
 
 // buildCardJSONWithGreyFooter renders the body as markdown followed by the

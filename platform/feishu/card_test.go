@@ -277,23 +277,21 @@ func TestBuildCardJSONWithStatusFooter(t *testing.T) {
 	}
 	body0 := card["body"].(map[string]any)
 	elements := body0["elements"].([]any)
-	// body markdown + one small grey plain_text line per footer line, no divider
-	if len(elements) != 3 {
-		t.Fatalf("expected 3 elements (body markdown, 2 footer lines), got %d: %#v", len(elements), elements)
+	// body markdown + one small grey plain_text block holding all footer lines, no divider
+	if len(elements) != 2 {
+		t.Fatalf("expected 2 elements (body markdown, footer block), got %d: %#v", len(elements), elements)
 	}
 	bodyEl := elements[0].(map[string]any)
 	if bodyEl["tag"] != "markdown" || bodyEl["content"] != body {
 		t.Errorf("body element = %#v, want markdown with content %q", bodyEl, body)
 	}
-	for i, want := range []string{"Opus 4.7 · ↑ 1 ↓ 168 · 4%", "~/path/to/ws"} {
-		el := elements[i+1].(map[string]any)
-		if el["tag"] != "div" {
-			t.Fatalf("footer line %d tag = %v, want div", i, el["tag"])
-		}
-		text := el["text"].(map[string]any)
-		if text["tag"] != "plain_text" || text["text_size"] != footerTextSize || text["text_color"] != "grey" || text["content"] != want {
-			t.Errorf("footer line %d = %#v, want grey %s plain_text %q", i, text, footerTextSize, want)
-		}
+	el := elements[1].(map[string]any)
+	if el["tag"] != "div" {
+		t.Fatalf("footer tag = %v, want div", el["tag"])
+	}
+	text := el["text"].(map[string]any)
+	if text["tag"] != "plain_text" || text["text_size"] != footerTextSize || text["text_color"] != "grey" || text["content"] != footer {
+		t.Errorf("footer = %#v, want grey %s plain_text %q", text, footerTextSize, footer)
 	}
 }
 
