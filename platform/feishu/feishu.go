@@ -4872,22 +4872,20 @@ func buildCardJSONWithStatusFooter(content, footer string) string {
 	if strings.TrimSpace(footer) == "" {
 		return buildCardJSON(content)
 	}
-	segments := sanitizeCardMarkdownSegmentsForCard([]string{content, footer})
-	content = segments[0]
-	footer = segments[1]
-	elements := []map[string]any{
-		{
-			"tag":     "markdown",
-			"content": content,
-		},
-		{
-			"tag": "hr",
-		},
-		{
-			"tag":       "markdown",
-			"content":   footer,
-			"text_size": "notation",
-		},
+	var elements []map[string]any
+	if hasComplexMarkdown(footer) {
+		// Rare: a footer carrying tables/code blocks stays markdown so it shares
+		// the card's table budget with the body; small size, no divider.
+		segments := sanitizeCardMarkdownSegmentsForCard([]string{content, footer})
+		elements = []map[string]any{
+			{"tag": "markdown", "content": segments[0]},
+			{"tag": "markdown", "content": segments[1], "text_size": footerTextSize},
+		}
+	} else {
+		// Usual case: status lines rendered in the shared small grey style.
+		segments := sanitizeCardMarkdownSegmentsForCard([]string{content})
+		elements = []map[string]any{{"tag": "markdown", "content": segments[0]}}
+		elements = append(elements, greyFooterElements(footer)...)
 	}
 	card := map[string]any{
 		"schema": "2.0",
@@ -7520,20 +7518,8 @@ func buildRichCardJSONBytes(status core.CardStatus, steps []core.ToolStep, markd
 	// Each line renders as its own dim "notation"-sized markdown block so they
 	// visually sit below the body without being mistaken for content. Skip
 	// rendering when statusFooter is empty (footer disabled / nothing to show).
-	var footerElements []map[string]any
-	if statusFooter != "" {
-		for _, line := range strings.Split(statusFooter, "\n") {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			footerElements = append(footerElements, map[string]any{
-				"tag":       "markdown",
-				"content":   sanitizeCardMarkdownForCard(line),
-				"text_size": "notation",
-			})
-		}
-	}
+	// Rendered with the shared small grey footer style (see greyFooterElements).
+	footerElements := greyFooterElements(statusFooter)
 
 	var elements []map[string]any
 	if len(panelMaps) > 0 {
@@ -7543,8 +7529,6 @@ func buildRichCardJSONBytes(status core.CardStatus, steps []core.ToolStep, markd
 		elements = append(elements, markdownMap)
 	}
 	if len(footerElements) > 0 {
-		// Insert a horizontal separator between body and footer so the boundary is clear.
-		elements = append(elements, map[string]any{"tag": "hr"})
 		elements = append(elements, footerElements...)
 	}
 

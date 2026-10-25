@@ -2,6 +2,7 @@ package feishu
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
@@ -63,10 +64,52 @@ func (p *Platform) sendWithFooterCard(ctx context.Context, rc replyContext, cont
 		return p.replyMessage(ctx, rc, msgType, msgBody)
 	}
 	body := sanitizeMarkdownURLs(preprocessFeishuMarkdown(normalizeAtTags(content, true)))
-	foot := sanitizeMarkdownURLs(preprocessFeishuMarkdown(footer))
-	cardJSON := buildCardJSONWithStatusFooter(body, foot)
+	cardJSON := buildCardJSONWithGreyFooter(body, footer)
 	if !p.shouldUseThreadOrReplyAPI(rc) {
 		return p.sendNewMessageToChat(ctx, rc, larkim.MsgTypeInteractive, cardJSON)
 	}
 	return p.replyMessage(ctx, rc, larkim.MsgTypeInteractive, cardJSON)
+}
+
+// footerTextSize is the size of every card footer line (status/context,
+// workspace, filter note): Lark's smallest preset, 10px.
+const footerTextSize = "x-small"
+
+// greyFooterElements renders each non-empty footer line as small grey plain
+// text, so all card footers (context/token status, workspace hint, filter
+// note) share one dim metadata style without a divider.
+func greyFooterElements(footer string) []map[string]any {
+	var elements []map[string]any
+	for _, line := range strings.Split(footer, "\n") {
+		if line = strings.TrimSpace(line); line == "" {
+			continue
+		}
+		elements = append(elements, map[string]any{
+			"tag": "div",
+			"text": map[string]any{
+				"tag":        "plain_text",
+				"content":    line,
+				"text_size":  footerTextSize,
+				"text_color": "grey",
+			},
+		})
+	}
+	return elements
+}
+
+// buildCardJSONWithGreyFooter renders the body as markdown followed by the
+// grey footer lines (see greyFooterElements).
+func buildCardJSONWithGreyFooter(content, footer string) string {
+	elements := []map[string]any{{
+		"tag":     "markdown",
+		"content": sanitizeCardMarkdownForCard(content),
+	}}
+	elements = append(elements, greyFooterElements(footer)...)
+	card := map[string]any{
+		"schema": "2.0",
+		"config": map[string]any{"wide_screen_mode": true},
+		"body":   map[string]any{"elements": elements},
+	}
+	b, _ := json.Marshal(card)
+	return string(b)
 }

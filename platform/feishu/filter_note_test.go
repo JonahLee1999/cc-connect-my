@@ -1,6 +1,7 @@
 package feishu
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/chenhg5/cc-connect/core"
@@ -52,5 +53,35 @@ func TestJoinFooters(t *testing.T) {
 	}
 	if got := joinFooters("model · ctx 4%", "Jev p=0.9"); got != "model · ctx 4%\nJev p=0.9" {
 		t.Fatalf("got %q", got)
+	}
+}
+
+func TestBuildCardJSONWithGreyFooter(t *testing.T) {
+	out := buildCardJSONWithGreyFooter("**正文**", "model · ctx 4%\n\nJev p=0.9 · 0.6s")
+	var card struct {
+		Body struct {
+			Elements []map[string]any `json:"elements"`
+		} `json:"body"`
+	}
+	if err := json.Unmarshal([]byte(out), &card); err != nil {
+		t.Fatal(err)
+	}
+	els := card.Body.Elements
+	if len(els) != 3 || els[0]["tag"] != "markdown" {
+		t.Fatalf("want markdown + 2 footer lines, got %v", els)
+	}
+	for _, e := range els[1:] {
+		if e["tag"] != "div" {
+			t.Fatalf("footer must be a div, got %v", e)
+		}
+		text := e["text"].(map[string]any)
+		if text["tag"] != "plain_text" || text["text_size"] != footerTextSize || text["text_color"] != "grey" {
+			t.Fatalf("footer must be grey %s plain_text, got %v", footerTextSize, text)
+		}
+	}
+	for _, e := range els {
+		if e["tag"] == "hr" {
+			t.Fatal("no divider expected")
+		}
 	}
 }
