@@ -16754,3 +16754,42 @@ func TestProcessInteractiveEvents_StreamingCard_BareNoReply_Suppressed(t *testin
 		t.Fatalf("silent reply leaked NO_REPLY into the streaming card: %q", card.finalContent())
 	}
 }
+
+func TestHandleMessage_AutoResetOnIdle_SilentSendsNoNotice(t *testing.T) {
+	p := &stubPlatformEngine{n: "test"}
+	agentSession := newResultAgentSession("fresh reply")
+	agent := &resultAgent{session: agentSession}
+	e := NewEngine("test", agent, []Platform{p}, "", LangEnglish)
+	e.SetResetOnIdle(60 * time.Minute)
+	e.SetResetOnIdleSilent(true)
+
+	key := "test:user1"
+	old := e.sessions.GetOrCreateActive(key)
+	old.AddHistory("user", "stale context")
+	staleAt := time.Now().Add(-2 * time.Hour)
+	old.mu.Lock()
+	old.LastUserActivity = staleAt
+	old.UpdatedAt = staleAt
+	old.mu.Unlock()
+
+	e.handleMessage(p, &Message{SessionKey: key, Platform: "test", UserID: "u1", UserName: "user",
+		Content: "hello after idle", ReplyCtx: "ctx"})
+
+	deadline := time.After(2 * time.Second)
+	for {
+		active := e.sessions.GetOrCreateActive(key)
+		if active.ID != old.ID && len(p.getSent()) >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for silent idle auto-reset, sent=%v", p.getSent())
+		default:
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	sent := p.getSent()
+	if len(sent) != 1 || sent[0] != "fresh reply" {
+		t.Fatalf("silent auto-reset must only send the reply, got %q", sent)
+	}
+}

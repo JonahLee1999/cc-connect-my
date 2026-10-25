@@ -716,6 +716,7 @@ func main() {
 		}
 		resetIdle, defaulted := resolveResetOnIdle(proj.ResetOnIdleMins)
 		engine.SetResetOnIdle(resetIdle)
+		engine.SetResetOnIdleSilent(proj.ResetOnIdleSilent != nil && *proj.ResetOnIdleSilent)
 		if defaulted {
 			slog.Info("project: reset_on_idle_mins not set, applying default — set reset_on_idle_mins = 0 to opt out, see docs/usage.md",
 				"project", proj.Name, "default_minutes", defaultResetOnIdleMins)

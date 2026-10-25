@@ -190,6 +190,7 @@ level = "info" # debug, info, warn, error
 # 默认值为 30 分钟（未设置时）。设为 0 可以禁用此行为，恢复始终继续上次会话。
 # [[projects]]
 # reset_on_idle_mins = 30   # default when unset / 未设置时的默认值；设为 0 表示禁用
+# reset_on_idle_silent = false   # true: rotate silently, no auto-reset notice / 为 true 时静默切换，不发送自动重置提示
 
 # Close an idle live agent process after a clean turn while preserving the
 # cc-connect session and saved agent session ID. The next message in the same

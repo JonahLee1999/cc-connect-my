@@ -443,6 +443,7 @@ type Engine struct {
 	// processInteractiveEvents.
 	autoCompressAllowHeuristic bool
 	resetOnIdle                time.Duration
+	resetOnIdleSilent          bool // rotate idle sessions without user-visible notices
 
 	// Reply footer composition flags. The footer renders up to two lines:
 	//   line 1 — model · [effort ·] out/in/cw/cr · ctx%   (gated by showContextIndicator)
@@ -981,6 +982,12 @@ func (e *Engine) SetAutoCompressConfigWithSource(enabled bool, maxTokens int, mi
 		minGap = 30 * time.Minute
 	}
 	e.autoCompressMinGap = minGap
+}
+
+// SetResetOnIdleSilent makes idle auto-reset rotate the session without the
+// "closing previous session" and "session auto-reset" notices.
+func (e *Engine) SetResetOnIdleSilent(silent bool) {
+	e.resetOnIdleSilent = silent
 }
 
 // SetResetOnIdle configures automatic session rotation after prolonged inactivity.
@@ -3366,7 +3373,7 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 	hasAgent := hasState && state != nil && state.agentSession != nil && state.agentSession.Alive()
 	e.interactiveMu.Unlock()
 
-	if hasAgent {
+	if hasAgent && !e.resetOnIdleSilent {
 		// Notify the user before the potentially long close. The close
 		// returns as soon as the process exits (usually seconds), but
 		// Stop hooks can take up to 120s.
@@ -3390,7 +3397,11 @@ func (e *Engine) maybeAutoResetSessionOnIdle(p Platform, msg *Message, sessions 
 	e.cleanupInteractiveState(interactiveKey)
 	session.UnlockWithoutUpdate(lockGen)
 
-	e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgSessionAutoResetIdle, int(e.resetOnIdle/time.Minute)))
+	if !e.resetOnIdleSilent {
+		e.reply(p, msg.ReplyCtx, e.i18n.Tf(MsgSessionAutoResetIdle, int(e.resetOnIdle/time.Minute)))
+	} else {
+		slog.Info("session auto-reset after idle (silent)", "session_key", msg.SessionKey, "idle_minutes", int(e.resetOnIdle/time.Minute))
+	}
 	return newSession, newGen
 }
 
