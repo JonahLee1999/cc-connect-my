@@ -62,7 +62,7 @@ func TestMessageFilterAllow(t *testing.T) {
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newMessageFilter(map[string]any{"message_filter_cmd": writeFilterScript(t, c.body), "message_filter_timeout_ms": int64(500)})
-			if got, _ := f.allow("feishu", msg); got != c.want {
+			if got, _, _ := f.allow("feishu", msg); got != c.want {
 				t.Fatalf("allow=%v want %v", got, c.want)
 			}
 		})

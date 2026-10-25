@@ -165,6 +165,7 @@ type Platform struct {
 	userNameCache          sync.Map          // open_id -> display name
 	chatNameCache          sync.Map          // chat_id -> chat name
 	chatContext            *chatContext      // nil = no group context sharing (see chat_context.go)
+	filterNotes            sync.Map          // session key -> footer note from message_filter_cmd (see filter_note.go)
 	mentionInCard          bool              // send replies with mentions+markdown as cards (see mention_done.go)
 	threadDoneMarker       string            // reply line that marks the thread root done (see mention_done.go)
 	threadDoneEmoji        string            // emoji added to the thread root for threadDoneMarker
@@ -3487,6 +3488,9 @@ func (p *Platform) Reply(ctx context.Context, rctx any, content string) error {
 	}
 
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
+	if note := p.takeFilterNote(rc.sessionKey); note != "" {
+		return p.sendWithFooterCard(ctx, rc, content, note)
+	}
 	msgType, msgBody := p.buildReplyContentFor(content)
 
 	if !p.shouldUseThreadOrReplyAPI(rc) {
@@ -3516,6 +3520,9 @@ func (p *Platform) Send(ctx context.Context, rctx any, content string) error {
 	}
 
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
+	if note := p.takeFilterNote(rc.sessionKey); note != "" {
+		return p.sendWithFooterCard(ctx, rc, content, note)
+	}
 	msgType, msgBody := p.buildReplyContentFor(content)
 	return p.sendNewMessageToChat(ctx, rc, msgType, msgBody)
 }
@@ -3540,6 +3547,9 @@ func (p *Platform) SendWithStatusFooter(ctx context.Context, rctx any, content, 
 	}
 	// Resolve mentions first so we can detect whether a real @mention is
 	content = p.resolveMentionsInContent(ctx, rc.chatID, content)
+	if note := p.takeFilterNote(rc.sessionKey); note != "" {
+		return p.sendWithFooterCard(ctx, rc, content, joinFooters(footer, note))
+	}
 	if strings.TrimSpace(footer) == "" || strings.Contains(content, `<at user_id=`) || strings.Contains(content, `<at id=`) {
 		if strings.TrimSpace(footer) != "" {
 			content += "\n\n" + footer

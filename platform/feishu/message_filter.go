@@ -51,6 +51,7 @@ type messageFilterInput struct {
 type messageFilterOutput struct {
 	Action string `json:"action"`
 	Reason string `json:"reason"`
+	Note   string `json:"note"` // optional footer shown on the reply (see filter_note.go)
 }
 
 func newMessageFilter(opts map[string]any) *messageFilter {
@@ -101,11 +102,12 @@ func buildMessageFilterInput(platform string, msg *core.Message) messageFilterIn
 	return in
 }
 
-// allow reports whether msg should be dispatched to the agent.
-func (f *messageFilter) allow(platform string, msg *core.Message) (bool, string) {
+// allow reports whether msg should be dispatched to the agent, why, and an
+// optional note to show on the reply.
+func (f *messageFilter) allow(platform string, msg *core.Message) (bool, string, string) {
 	payload, err := json.Marshal(buildMessageFilterInput(platform, msg))
 	if err != nil {
-		return true, "marshal error"
+		return true, "marshal error", ""
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), f.timeout)
 	defer cancel()
@@ -117,16 +119,16 @@ func (f *messageFilter) allow(platform string, msg *core.Message) (bool, string)
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout
 	if err := cmd.Run(); err != nil {
-		return true, "filter error: " + err.Error()
+		return true, "filter error: " + err.Error(), ""
 	}
 	var out messageFilterOutput
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &out); err != nil {
-		return true, "unparseable filter output"
+		return true, "unparseable filter output", ""
 	}
 	if strings.EqualFold(out.Action, "skip") {
-		return false, out.Reason
+		return false, out.Reason, out.Note
 	}
-	return true, out.Reason
+	return true, out.Reason, out.Note
 }
 
 // passesMessageFilter applies the configured filter; true = dispatch.
@@ -139,8 +141,11 @@ func (p *Platform) passesMessageFilter(msg *core.Message) bool {
 		return true // explicit button clicks (permission answers, options) are never filtered
 	}
 	start := time.Now()
-	ok, reason := f.allow(p.platformName, msg)
+	ok, reason, note := f.allow(p.platformName, msg)
 	elapsed := time.Since(start)
+	if ok {
+		p.setFilterNote(msg.SessionKey, note) // replaces any stale note of this session
+	}
 	if !ok {
 		slog.Info(p.tag()+": message skipped by filter",
 			"message_id", msg.MessageID, "session_key", msg.SessionKey, "reason", reason, "elapsed", elapsed)
