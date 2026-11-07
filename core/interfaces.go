@@ -257,6 +257,14 @@ type MessageUpdater interface {
 	UpdateMessage(ctx context.Context, replyCtx any, content string) error
 }
 
+// FinalResponseObserver receives the original final response after successful
+// delivery, including when delivery edited a preview/card instead of calling
+// Send. Silent replies and failed turns/deliveries do not trigger it. Platforms
+// can use explicit control markers without relying on a particular renderer.
+type FinalResponseObserver interface {
+	OnFinalResponseDelivered(ctx context.Context, replyCtx any, content string)
+}
+
 // StatusFooterSender is an optional Platform extension for sending a reply
 // with a structured per-turn status footer rendered using platform-specific
 // dim/small styling (e.g. Lark `text_size: "notation"`). Platforms that do

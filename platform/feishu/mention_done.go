@@ -1,8 +1,11 @@
 package feishu
 
 import (
+	"context"
+	"log/slog"
 	"regexp"
 	"strings"
+	"time"
 
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
@@ -89,6 +92,18 @@ func (p *Platform) stripDoneMarker(content string) string {
 	return out
 }
 
+// OnFinalResponseDelivered also covers rich cards and finalized previews,
+// which bypass the normal Reply/Send marker handling.
+func (p *Platform) OnFinalResponseDelivered(_ context.Context, rctx any, content string) {
+	rc, ok := rctx.(replyContext)
+	if !ok {
+		return
+	}
+	if _, done := p.takeDoneMarker(content); done {
+		go p.markThreadRootDone(rc.sessionKey)
+	}
+}
+
 // markThreadRootDone adds the done emoji to the thread root of sessionKey.
 func (p *Platform) markThreadRootDone(sessionKey string) {
 	parts := strings.SplitN(sessionKey, ":", 3)
@@ -106,7 +121,16 @@ func (p *Platform) markThreadRootDone(sessionKey string) {
 	if emoji == "" {
 		emoji = "DONE"
 	}
-	p.addReactionWithEmoji(root, emoji)
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if p.addReactionWithEmojiContext(ctx, root, emoji) == "" {
+		// Reserve the root while in flight, but allow a later completion to
+		// retry when the API failed instead of permanently caching failure.
+		p.doneRoots.Delete(root)
+		slog.Warn(p.tag()+": thread done reaction failed", "root_message_id", root)
+		return
+	}
+	slog.Info(p.tag()+": thread marked done", "root_message_id", root)
 }
 
 func optBool(opts map[string]any, key string) bool {

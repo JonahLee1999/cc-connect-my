@@ -2136,6 +2136,53 @@ func TestCUJ_H3_SharedSessionLinkedToIntegration(t *testing.T) {
 // Covered by platform/feishu/card_test.go and release-gate TestCC_CARD_01_rich.
 func TestCUJ_I1_RichCardLinkedToPlatformAndIntegration(t *testing.T) {
 	t.Log("CUJ-I1: covered by platform/feishu/card_test.go + release-gate TestCC_CARD_01_rich")
+	t.Run("TaskCompletionAfterApproval", func(t *testing.T) {
+		p := &taskCompletionCUJPlatform{}
+		p.n = "test"
+		a := &cujAgent{}
+		e := NewEngine("completion", a, []Platform{p}, filepath.Join(t.TempDir(), "sessions.json"), LangEnglish)
+		t.Cleanup(func() { _ = e.Stop() })
+		e.SetDisplayConfig(DisplayCfg{Mode: "full", CardMode: "rich", ToolMessages: true})
+		env := &cujEnv{t: t, engine: e, plat: &p.stubPlatformEngine, agent: a}
+		const key = "test:chat:root:task"
+		for i, turn := range []struct{ input, answer string }{
+			{"Please investigate", "Need the record ID"},
+			{"Record 42", "Checked record 42; awaiting administrator approval"},
+			{"Approved", "Updated record 42; verified\n[[DONE]]"},
+		} {
+			events := []Event{{Type: EventText, Content: turn.answer}, {Type: EventResult, Content: turn.answer, Done: true}}
+			if i == 0 {
+				a.setNextSessionEvents(events, 0)
+			} else {
+				a.mu.Lock()
+				s := a.sessions[len(a.sessions)-1]
+				a.mu.Unlock()
+				s.mu.Lock()
+				s.pendingEvents = events
+				s.mu.Unlock()
+			}
+			e.ReceiveMessage(p, &Message{SessionKey: key, Platform: p.Name(), MessageID: fmt.Sprintf("turn-%d", i), UserID: "requester", Content: turn.input, ReplyCtx: "topic-root"})
+			env.waitFor("visible final card", 2*time.Second, func() bool {
+				_, _, updates, _ := p.snapshot()
+				return strings.Contains(strings.Join(updates, "\n"), strings.Split(turn.answer, "\n")[0])
+			})
+			env.waitFor("turn finished", 2*time.Second, func() bool { return !e.sessions.GetOrCreateActive(key).Busy() })
+			if got := env.sentContains("topic-root reaction: DONE"); got != (i == 2) {
+				t.Fatalf("visible DONE after action %d = %v", i+1, got)
+			}
+		}
+	})
+}
+
+// Model the platform boundary's visible topic reaction; actual marker parsing,
+// rich-card JSON and reaction HTTP requests are covered by platform tests.
+type taskCompletionCUJPlatform struct{ finalResponsePlatform }
+
+func (p *taskCompletionCUJPlatform) OnFinalResponseDelivered(ctx context.Context, replyCtx any, content string) {
+	p.finalResponsePlatform.OnFinalResponseDelivered(ctx, replyCtx, content)
+	if strings.HasSuffix(content, "\n[[DONE]]") {
+		_ = p.stubPlatformEngine.Send(ctx, replyCtx, fmt.Sprint(replyCtx)+" reaction: DONE")
+	}
 }
 
 // CUJ-I2 · Legacy card mode for backwards-compatibility.

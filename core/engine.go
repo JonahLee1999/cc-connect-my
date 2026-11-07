@@ -6556,6 +6556,12 @@ func (e *Engine) processInteractiveEvents(state *interactiveState, session *Sess
 				}
 			}
 
+			if !isSilent {
+				if observer, ok := p.(FinalResponseObserver); ok {
+					observer.OnFinalResponseDelivered(e.ctx, replyCtx, baseResponse)
+				}
+			}
+
 			if elapsed := time.Since(replyStart); elapsed >= slowPlatformSend {
 				slog.Warn("slow final reply send", "platform", p.Name(), "elapsed", elapsed, "response_len", len(fullResponse))
 			}

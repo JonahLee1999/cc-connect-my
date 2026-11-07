@@ -7656,7 +7656,7 @@ func splitMarkdownByTables(md string, maxTables int) []string {
 // statusFooter (multi-line, '\n'-separated) and passes it through; the renderer
 // splits it back into one dim notation block per line.
 func (p *Platform) BuildRichCard(status core.CardStatus, title string, steps []core.ToolStep, markdown string, streaming bool, statusFooter string) string {
-	return buildRichCard(status, title, steps, markdown, streaming, statusFooter)
+	return buildRichCard(status, title, steps, p.stripDoneMarker(markdown), streaming, statusFooter)
 }
 
 // SplitMarkdownByTables implements core.MarkdownTableSplitter.
