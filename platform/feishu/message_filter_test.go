@@ -48,20 +48,23 @@ func TestBuildMessageFilterInput(t *testing.T) {
 func TestMessageFilterAllow(t *testing.T) {
 	msg := &core.Message{SessionKey: "feishu:oc_1:root:om_root", MessageID: "om_root", Content: "收到"}
 	cases := []struct {
-		name string
-		body string
-		want bool
+		name      string
+		body      string
+		timeoutMs int64
+		want      bool
 	}{
-		{"pass", `cat >/dev/null; echo '{"action":"pass"}'`, true},
-		{"skip", `cat >/dev/null; echo '{"action":"skip","reason":"small talk"}'`, false},
-		{"reads stdin", `grep -q '"text":"收到"' && echo '{"action":"skip"}' || echo '{"action":"pass"}'`, false},
-		{"non-zero exit fails open", `exit 3`, true},
-		{"garbage fails open", `echo nope`, true},
-		{"timeout fails open", `sleep 5; echo '{"action":"skip"}'`, true},
+		// Generous timeouts so a loaded machine cannot turn a verdict into a
+		// fail-open timeout; only the timeout case uses a short one.
+		{"pass", `cat >/dev/null; echo '{"action":"pass"}'`, 5000, true},
+		{"skip", `cat >/dev/null; echo '{"action":"skip","reason":"small talk"}'`, 5000, false},
+		{"reads stdin", `grep -q '"text":"收到"' && echo '{"action":"skip"}' || echo '{"action":"pass"}'`, 5000, false},
+		{"non-zero exit fails open", `exit 3`, 5000, true},
+		{"garbage fails open", `echo nope`, 5000, true},
+		{"timeout fails open", `sleep 5; echo '{"action":"skip"}'`, 500, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			f := newMessageFilter(map[string]any{"message_filter_cmd": writeFilterScript(t, c.body), "message_filter_timeout_ms": int64(500)})
+			f := newMessageFilter(map[string]any{"message_filter_cmd": writeFilterScript(t, c.body), "message_filter_timeout_ms": c.timeoutMs})
 			if got, _, _ := f.allow("feishu", msg); got != c.want {
 				t.Fatalf("allow=%v want %v", got, c.want)
 			}
