@@ -3820,7 +3820,7 @@ found:
 		// More questions remaining — advance to next and send new card
 		if curIdx+1 < len(pending.Questions) {
 			pending.CurrentQuestion = curIdx + 1
-			e.reply(p, msg.ReplyCtx, fmt.Sprintf("✅ %s: **%s**", q.Question, answer))
+			e.replyAskAnswer(p, msg.ReplyCtx, strings.HasPrefix(strings.TrimSpace(content), "askq:"), q.Question, answer)
 			e.sendAskQuestionPrompt(p, msg.ReplyCtx, pending.Questions, curIdx+1)
 			return true
 		}
@@ -3835,7 +3835,7 @@ found:
 			slog.Error("failed to send AskUserQuestion response", "error", err)
 			e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgError), err))
 		} else {
-			e.reply(p, msg.ReplyCtx, fmt.Sprintf("✅ %s: **%s**", q.Question, answer))
+			e.replyAskAnswer(p, msg.ReplyCtx, strings.HasPrefix(strings.TrimSpace(content), "askq:"), q.Question, answer)
 		}
 
 		state.mu.Lock()
@@ -3906,6 +3906,18 @@ func (e *Engine) lookupPending(iKey string) (*interactiveState, *pendingPermissi
 	pending := state.pending
 	state.mu.Unlock()
 	return state, pending
+}
+
+// replyAskAnswer confirms a recorded AskUserQuestion answer in the chat.
+// Button clicks on card platforms are not echoed: the clicked card is
+// already replaced by a green "✅ <answer>" card, so a second message would
+// only repeat it. Typed answers are still confirmed, which also shows what an
+// option number resolved to.
+func (e *Engine) replyAskAnswer(p Platform, replyCtx any, fromButton bool, question, answer string) {
+	if fromButton && supportsCards(p) {
+		return
+	}
+	e.reply(p, replyCtx, fmt.Sprintf("✅ %s: **%s**", question, answer))
 }
 
 // parseAskQuestionCallback recognizes the value an AskUserQuestion option
