@@ -1728,11 +1728,11 @@ app_secret = "your-feishu-app-secret"
 # reasoning_effort = "high"  # "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra"
 #
 # Optional: project system prompt / 可选：项目系统提示
-# Codex has no native system-prompt flag, so cc-connect injects this as a
-# preamble prepended to your first message of each new session (resumed
-# sessions are not re-injected).
-# Codex 没有原生的系统提示参数，cc-connect 会将其作为前导内容注入到每个新
-# 会话的第一条消息之前（恢复的会话不会重复注入）。
+# With backend="app_server", current project instructions are applied via
+# developerInstructions on both thread/start and thread/resume. The exec
+# backend uses a first-message preamble for new sessions.
+# app_server 后端在新建及恢复会话时都注入当前项目规则；exec 后端仅在新会话
+# 首条消息前添加前导内容。
 # system_prompt = "You are a helpful AI assistant that specializes in Python development."
 #
 # Optional: additional project instructions / 可选：追加的项目指令
@@ -1741,6 +1741,15 @@ app_secret = "your-feishu-app-secret"
 # 追加在 system_prompt 之后，包含在同一段注入的前导内容中。可单独使用，也可与
 # system_prompt 同时使用。
 # append_system_prompt = "Always respond in Chinese and prefer concise answers."
+#
+# Optional: required Markdown/SKILL.md instruction file, appended after inline
+# instructions. Relative paths resolve once against the configured work_dir.
+# Missing/empty files reject startup and new/resumed agent sessions. Files are
+# re-read on session start; restart cc-connect to refresh running sessions.
+# 可选：强制加载的 Markdown/SKILL.md 指令文件，追加在内联指令后；相对路径
+# 固定相对于初始 work_dir。缺失或为空时拒绝启动/恢复会话。文件在会话启动时
+# 重读；更新后重启 cc-connect 可刷新已运行会话。
+# append_system_prompt_file = "/path/to/cc-connect-feishu-workflow/SKILL.md"
 #
 # # Active provider / 当前激活的 provider
 # # provider = "openai"

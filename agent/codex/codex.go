@@ -33,22 +33,23 @@ func init() {
 //   - "full-auto": --sandbox workspace-write + approval_policy=never
 //   - "yolo":      --dangerously-bypass-approvals-and-sandbox
 type Agent struct {
-	workDir         string
-	model           string
-	reasoningEffort string
-	mode            string // "suggest" | "auto-edit" | "full-auto" | "yolo"
-	backend         string // "exec" | "app_server"
-	appServerURL    string
-	codexHome       string
-	systemPrompt    string
-	appendPrompt    string
-	cmd             string   // explicit CLI command; empty enables discovery
-	cliExtraArgs    []string // extra args parsed from cmd after the binary
-	providers       []core.ProviderConfig
-	activeIdx       int      // -1 = no provider set
-	configEnv       []string // env vars from [projects.agent.options.env] — persists across SetSessionEnv calls
-	sessionEnv      []string
-	mu              sync.RWMutex
+	workDir          string
+	model            string
+	reasoningEffort  string
+	mode             string // "suggest" | "auto-edit" | "full-auto" | "yolo"
+	backend          string // "exec" | "app_server"
+	appServerURL     string
+	codexHome        string
+	systemPrompt     string
+	appendPrompt     string
+	appendPromptFile string   // absolute path pinned to the configured project
+	cmd              string   // explicit CLI command; empty enables discovery
+	cliExtraArgs     []string // extra args parsed from cmd after the binary
+	providers        []core.ProviderConfig
+	activeIdx        int      // -1 = no provider set
+	configEnv        []string // env vars from [projects.agent.options.env] — persists across SetSessionEnv calls
+	sessionEnv       []string
+	mu               sync.RWMutex
 }
 
 func New(opts map[string]any) (core.Agent, error) {
@@ -64,6 +65,18 @@ func New(opts map[string]any) (core.Agent, error) {
 	codexHome, _ := opts["codex_home"].(string)
 	systemPrompt, _ := opts["system_prompt"].(string)
 	appendPrompt, _ := opts["append_system_prompt"].(string)
+	appendPromptFile, _ := opts["append_system_prompt_file"].(string)
+	appendPromptFile = strings.TrimSpace(appendPromptFile)
+	if appendPromptFile != "" {
+		if !filepath.IsAbs(appendPromptFile) {
+			appendPromptFile = filepath.Join(workDir, appendPromptFile)
+		}
+		var err error
+		appendPromptFile, err = filepath.Abs(appendPromptFile)
+		if err != nil {
+			return nil, fmt.Errorf("codex: append_system_prompt_file path: %w", err)
+		}
+	}
 	mode = normalizeMode(mode)
 	backend = normalizeBackend(backend)
 	appServerURL = normalizeAppServerURL(appServerURL)
@@ -94,21 +107,27 @@ func New(opts map[string]any) (core.Agent, error) {
 		}
 	}
 
-	return &Agent{
-		workDir:         workDir,
-		model:           model,
-		reasoningEffort: normalizeReasoningEffort(reasoningEffort),
-		mode:            mode,
-		backend:         backend,
-		appServerURL:    appServerURL,
-		codexHome:       strings.TrimSpace(codexHome),
-		systemPrompt:    strings.TrimSpace(systemPrompt),
-		appendPrompt:    strings.TrimSpace(appendPrompt),
-		cmd:             cmd,
-		cliExtraArgs:    cliExtraArgs,
-		configEnv:       configEnv,
-		activeIdx:       -1,
-	}, nil
+	agent := &Agent{
+		workDir:          workDir,
+		model:            model,
+		reasoningEffort:  normalizeReasoningEffort(reasoningEffort),
+		mode:             mode,
+		backend:          backend,
+		appServerURL:     appServerURL,
+		codexHome:        strings.TrimSpace(codexHome),
+		systemPrompt:     strings.TrimSpace(systemPrompt),
+		appendPrompt:     strings.TrimSpace(appendPrompt),
+		appendPromptFile: appendPromptFile,
+		cmd:              cmd,
+		cliExtraArgs:     cliExtraArgs,
+		configEnv:        configEnv,
+		activeIdx:        -1,
+	}
+	// Validate required policy before accepting the project configuration.
+	if _, _, err := agent.sessionPrompts(); err != nil {
+		return nil, err
+	}
+	return agent, nil
 }
 
 func normalizeBackend(raw string) string {
@@ -491,6 +510,10 @@ func (a *Agent) SetSessionEnv(env []string) {
 }
 
 func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentSession, error) {
+	systemPrompt, appendPrompt, err := a.sessionPrompts()
+	if err != nil {
+		return nil, err
+	}
 	a.mu.Lock()
 	mode := a.mode
 	model := a.model
@@ -498,8 +521,6 @@ func (a *Agent) StartSession(ctx context.Context, sessionID string) (core.AgentS
 	backend := a.backend
 	appServerURL := a.appServerURL
 	codexHome := a.codexHome
-	systemPrompt := a.systemPrompt
-	appendPrompt := a.appendPrompt
 	cliBin := a.cmd
 	cliExtraArgs := a.cliExtraArgs
 	workDir := a.workDir

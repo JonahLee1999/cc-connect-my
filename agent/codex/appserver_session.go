@@ -178,10 +178,9 @@ type appServerSession struct {
 	closeOnce sync.Once
 	wg        sync.WaitGroup
 
-	stateMu      sync.Mutex
-	pendingMsgs  []string
-	currentTurn  string
-	preambleSent bool
+	stateMu     sync.Mutex
+	pendingMsgs []string
+	currentTurn string
 
 	runtimeMu sync.RWMutex
 	usage     *core.UsageReport
@@ -213,7 +212,6 @@ func newAppServerSession(ctx context.Context, cliBin string, cliExtraArgs []stri
 		cancel:           cancel,
 		pending:          make(map[int64]chan rpcResponseEnvelope),
 		pendingApprovals: make(map[string]chan core.PermissionResult),
-		preambleSent:     resumeID != "" && resumeID != core.ContinueSession,
 	}
 	s.alive.Store(true)
 
@@ -388,6 +386,11 @@ func (s *appServerSession) threadRequestParams() map[string]any {
 		"experimentalRawEvents":  false,
 		"persistExtendedHistory": false,
 	}
+	// Apply current project policy on both start and resume. A first-user-turn
+	// preamble leaves resumed threads stuck with stale configuration.
+	if s.promptPreamble != "" {
+		params["developerInstructions"] = s.promptPreamble
+	}
 	if model := s.GetModel(); model != "" {
 		params["model"] = model
 	}
@@ -485,13 +488,6 @@ func (s *appServerSession) Send(prompt string, messageID string, images []core.I
 	if err != nil {
 		return err
 	}
-
-	s.stateMu.Lock()
-	if !s.preambleSent {
-		prompt = prependCodexPromptPreamble(prompt, s.promptPreamble)
-		s.preambleSent = true
-	}
-	s.stateMu.Unlock()
 
 	threadID := s.CurrentSessionID()
 	if threadID == "" {

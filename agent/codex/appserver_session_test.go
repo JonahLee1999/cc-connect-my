@@ -13,6 +13,60 @@ import (
 	"github.com/chenhg5/cc-connect/core"
 )
 
+type policyRPCWriter struct {
+	respond func([]byte)
+}
+
+func (w policyRPCWriter) Write(data []byte) (int, error) {
+	w.respond(data)
+	return len(data), nil
+}
+func (w policyRPCWriter) Close() error { return nil }
+
+// Configured policy must be applied on resume too, without replacing the
+// thread/history or relying on an old first-user-message preamble.
+func TestAppServerSession_StartAndResumeApplyCurrentProjectInstructions(t *testing.T) {
+	for _, resumeID := range []string{"", "existing-thread"} {
+		t.Run("resume="+resumeID, func(t *testing.T) {
+			s := &appServerSession{
+				ctx: context.Background(), pending: make(map[int64]chan rpcResponseEnvelope),
+				promptPreamble: buildCodexPromptPreamble("project policy", "updated approval policy"),
+			}
+			var gotMethod string
+			var gotParams map[string]any
+			s.stdin = policyRPCWriter{respond: func(data []byte) {
+				var req struct {
+					ID     int64          `json:"id"`
+					Method string         `json:"method"`
+					Params map[string]any `json:"params"`
+				}
+				if err := json.Unmarshal(data, &req); err != nil {
+					t.Error(err)
+					return
+				}
+				gotMethod, gotParams = req.Method, req.Params
+				s.handleResponse(rpcResponseEnvelope{ID: req.ID, Result: json.RawMessage(`{"thread":{"id":"existing-thread"}}`)})
+			}}
+			if err := s.ensureThread(resumeID); err != nil {
+				t.Fatal(err)
+			}
+			wantMethod := "thread/start"
+			if resumeID != "" {
+				wantMethod = "thread/resume"
+			}
+			if gotMethod != wantMethod {
+				t.Fatalf("method = %q, want %q", gotMethod, wantMethod)
+			}
+			if gotParams["developerInstructions"] != s.promptPreamble {
+				t.Fatalf("current project instructions missing from %s", gotMethod)
+			}
+			if resumeID != "" && gotParams["threadId"] != resumeID {
+				t.Fatal("resume replaced existing thread")
+			}
+		})
+	}
+}
+
 func TestAppServerSession_ApplyThreadRuntimeState(t *testing.T) {
 	s := &appServerSession{}
 	effort := "xhigh"
@@ -505,17 +559,17 @@ func waitForWrittenJSONLine(t *testing.T, w *lockedWriteCloser) string {
 
 func TestAppServerListenURL(t *testing.T) {
 	cases := map[string]string{
-		"":                       "",
-		"  ":                     "",
-		"stdio://":               "",
-		"stdio":                  "",
-		"ws://127.0.0.1:3845":    "ws://127.0.0.1:3845",
-		"ws://localhost:9000":    "ws://localhost:9000",
-		"ws://127.0.0.1:3845 ":   "ws://127.0.0.1:3845",
-		" stdio ":                 "",
-		" stdio:// ":               "",
-		"STDIO":                    "",
-		"STDIO://":                 "",
+		"":                     "",
+		"  ":                   "",
+		"stdio://":             "",
+		"stdio":                "",
+		"ws://127.0.0.1:3845":  "ws://127.0.0.1:3845",
+		"ws://localhost:9000":  "ws://localhost:9000",
+		"ws://127.0.0.1:3845 ": "ws://127.0.0.1:3845",
+		" stdio ":              "",
+		" stdio:// ":           "",
+		"STDIO":                "",
+		"STDIO://":             "",
 	}
 	for in, want := range cases {
 		if got := appServerListenURL(in); got != want {
