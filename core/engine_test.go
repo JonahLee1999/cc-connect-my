@@ -6698,8 +6698,8 @@ func TestSendAskQuestionPrompt_CardPlatform(t *testing.T) {
 		t.Fatalf("expected 1 card, got %d", len(p.sentCards))
 	}
 	card := p.sentCards[0]
-	if card.Header == nil || card.Header.Color != "blue" {
-		t.Errorf("expected blue header, got %+v", card.Header)
+	if card.Header != nil {
+		t.Errorf("expected a plain card without header, got %+v", card.Header)
 	}
 	askqCount := countCardActionValues(card, "askq:")
 	if askqCount != 3 {
@@ -6789,19 +6789,18 @@ func TestSendAskQuestionPrompt_CardPlatform_LongLabelsOneButtonPerRow(t *testing
 			if len(el.Buttons) != 1 {
 				t.Errorf("expected one button per row, got %d", len(el.Buttons))
 			}
-			if rows == 1 && el.Buttons[0].Type != "primary" {
-				t.Errorf("first option should be the primary button, got %q", el.Buttons[0].Type)
-			}
 		case CardMarkdown:
 			markdowns++
-			body = el.Content
+			if markdowns == 2 {
+				body = el.Content
+			}
 		}
 	}
 	if rows != 3 {
 		t.Errorf("expected 3 action rows, got %d", rows)
 	}
-	if markdowns != 1 || !strings.Contains(body, "软删除") || !strings.Contains(body, "怎么处理这节课？") {
-		t.Errorf("expected one markdown block with question and descriptions, got %d: %q", markdowns, body)
+	if markdowns != 2 || !strings.Contains(body, "1. 删除课节和老师上报记录：软删除") {
+		t.Errorf("expected question plus one option list with descriptions, got %d: %q", markdowns, body)
 	}
 }
 
@@ -6815,8 +6814,9 @@ func TestSendAskQuestionPrompt_CardPlatform_MultiQuestion_ShowsIndex(t *testing.
 		t.Fatalf("expected 1 card, got %d", len(p.sentCards))
 	}
 	card := p.sentCards[0]
-	if !strings.Contains(card.Header.Title, "(1/2)") {
-		t.Errorf("expected (1/2) in title, got %s", card.Header.Title)
+	first, _ := card.Elements[0].(CardMarkdown)
+	if !strings.Contains(first.Content, "(1/2)") {
+		t.Errorf("expected (1/2) in the question line, got %q", first.Content)
 	}
 }
 
@@ -6903,8 +6903,8 @@ func TestProcessInteractiveEvents_AskUserQuestionFromAgent_RendersRichCardPrompt
 	}
 
 	card := waitForSentCard(t, &p.stubCardPlatform)
-	if card.Header == nil || card.Header.Color != "blue" {
-		t.Fatalf("card header = %#v, want blue AskUserQuestion card", card.Header)
+	if card.Header != nil {
+		t.Fatalf("card header = %#v, want plain AskUserQuestion card", card.Header)
 	}
 	if countCardActionValues(card, "askq:") != 3 {
 		t.Fatalf("askq button count = %d, want 3", countCardActionValues(card, "askq:"))

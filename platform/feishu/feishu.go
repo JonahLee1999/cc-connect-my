@@ -1002,18 +1002,18 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		if answerLabel == "" {
 			answerLabel = actionVal
 		}
-		// Anyone in the chat may answer, so the answered card shows who chose.
-		cb := core.NewCard().Title("✅ "+answerLabel, "green")
-		body := ""
+		// Same plain style as the question card; anyone in the chat may
+		// answer, so the answered card shows who chose.
+		cb := core.NewCard()
 		if askqQuestion != "" {
-			body = "<font color='grey'>" + askqQuestion + "</font>\n"
+			cb.Markdown("**" + askqQuestion + "**")
+			cb.Divider()
 		}
+		chosen := "✅ **" + answerLabel + "**"
 		if userID != "" {
-			body += "<at id=" + userID + "></at> → **" + answerLabel + "**"
-		} else {
-			body += "→ **" + answerLabel + "**"
+			chosen += "　<font color='grey'>由</font> <at id=" + userID + "></at> <font color='grey'>选择</font>"
 		}
-		cb.Markdown(body)
+		cb.Markdown(chosen)
 		return &callback.CardActionTriggerResponse{
 			Card: &callback.Card{
 				Type: "raw",

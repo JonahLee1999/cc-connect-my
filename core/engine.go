@@ -12681,18 +12681,21 @@ func (e *Engine) sendPermissionPrompt(p Platform, replyCtx any, prompt, toolName
 // per row.
 const askQuestionInlineButtonRunes = 24
 
-// buildAskQuestionCard renders one AskUserQuestion question as a card: the
-// question, the options with their descriptions as a compact list (only when
-// some option has a description, so labels are not repeated for nothing), and
-// the option buttons. Buttons use flat action rows: column_set layouts did not
+// buildAskQuestionCard renders one AskUserQuestion question as a plain card
+// (no colored header, like Feishu's approval notices): the question in bold,
+// a divider, the options as plain lines when some option has a description
+// (a bare list would only repeat the button labels), the option buttons, and
+// a grey hint. Buttons use flat action rows: column_set layouts did not
 // dispatch clicks on Feishu mobile (issue #1658). Multi-select questions list
 // numbered options to reply with, since a button click resolves the question.
 func (e *Engine) buildAskQuestionCard(q UserQuestion, titleSuffix string, answerValue func(option int) string) *Card {
-	cb := NewCard().Title(e.i18n.T(MsgAskQuestionTitle)+titleSuffix, "blue")
+	cb := NewCard()
 	question := q.Question
 	if q.MultiSelect {
 		question += e.i18n.T(MsgAskQuestionMulti)
 	}
+	cb.Markdown("**" + question + "**" + titleSuffix)
+	cb.Divider()
 	hasDesc := false
 	labelRunes := 0
 	for _, opt := range q.Options {
@@ -12701,38 +12704,26 @@ func (e *Engine) buildAskQuestionCard(q UserQuestion, titleSuffix string, answer
 		}
 		labelRunes += utf8.RuneCountInString(opt.Label)
 	}
-	var list strings.Builder
-	for i, opt := range q.Options {
-		if !q.MultiSelect && !hasDesc {
-			break
+	if q.MultiSelect || hasDesc {
+		lines := make([]string, 0, len(q.Options))
+		for i, opt := range q.Options {
+			line := fmt.Sprintf("%d. %s", i+1, opt.Label)
+			if opt.Description != "" {
+				line += "：" + opt.Description
+			}
+			lines = append(lines, line)
 		}
-		if q.MultiSelect {
-			fmt.Fprintf(&list, "%d. ", i+1)
-		}
-		list.WriteString("**" + opt.Label + "**")
-		if opt.Description != "" {
-			list.WriteString("　<font color='grey'>" + opt.Description + "</font>")
-		}
-		list.WriteString("\n")
+		cb.Markdown(strings.Join(lines, "\n"))
 	}
-	body := question
-	if list.Len() > 0 {
-		body += "\n\n" + strings.TrimSuffix(list.String(), "\n")
-	}
-	cb.Markdown(body)
 	if q.MultiSelect {
 		cb.Note(e.i18n.T(MsgAskQuestionNoteMulti))
 		return cb.Build()
 	}
 	buttons := make([]CardButton, 0, len(q.Options))
 	for i, opt := range q.Options {
-		btnType := "default"
-		if i == 0 {
-			btnType = "primary"
-		}
 		buttons = append(buttons, CardButton{
 			Text:  opt.Label,
-			Type:  btnType,
+			Type:  "default",
 			Value: answerValue(i + 1),
 			Extra: map[string]string{
 				"askq_label":    opt.Label,
