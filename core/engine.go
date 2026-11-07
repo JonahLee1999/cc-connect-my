@@ -12676,6 +12676,81 @@ func (e *Engine) sendPermissionPrompt(p Platform, replyCtx any, prompt, toolName
 	e.send(p, replyCtx, prompt)
 }
 
+// askQuestionInlineButtonRunes is the most label text (all options together)
+// that still fits one row of buttons on a phone; longer labels get one button
+// per row.
+const askQuestionInlineButtonRunes = 24
+
+// buildAskQuestionCard renders one AskUserQuestion question as a card: the
+// question, the options with their descriptions as a compact list (only when
+// some option has a description, so labels are not repeated for nothing), and
+// the option buttons. Buttons use flat action rows: column_set layouts did not
+// dispatch clicks on Feishu mobile (issue #1658). Multi-select questions list
+// numbered options to reply with, since a button click resolves the question.
+func (e *Engine) buildAskQuestionCard(q UserQuestion, titleSuffix string, answerValue func(option int) string) *Card {
+	cb := NewCard().Title(e.i18n.T(MsgAskQuestionTitle)+titleSuffix, "blue")
+	question := q.Question
+	if q.MultiSelect {
+		question += e.i18n.T(MsgAskQuestionMulti)
+	}
+	hasDesc := false
+	labelRunes := 0
+	for _, opt := range q.Options {
+		if opt.Description != "" {
+			hasDesc = true
+		}
+		labelRunes += utf8.RuneCountInString(opt.Label)
+	}
+	var list strings.Builder
+	for i, opt := range q.Options {
+		if !q.MultiSelect && !hasDesc {
+			break
+		}
+		if q.MultiSelect {
+			fmt.Fprintf(&list, "%d. ", i+1)
+		}
+		list.WriteString("**" + opt.Label + "**")
+		if opt.Description != "" {
+			list.WriteString("　<font color='grey'>" + opt.Description + "</font>")
+		}
+		list.WriteString("\n")
+	}
+	body := question
+	if list.Len() > 0 {
+		body += "\n\n" + strings.TrimSuffix(list.String(), "\n")
+	}
+	cb.Markdown(body)
+	if q.MultiSelect {
+		cb.Note(e.i18n.T(MsgAskQuestionNoteMulti))
+		return cb.Build()
+	}
+	buttons := make([]CardButton, 0, len(q.Options))
+	for i, opt := range q.Options {
+		btnType := "default"
+		if i == 0 {
+			btnType = "primary"
+		}
+		buttons = append(buttons, CardButton{
+			Text:  opt.Label,
+			Type:  btnType,
+			Value: answerValue(i + 1),
+			Extra: map[string]string{
+				"askq_label":    opt.Label,
+				"askq_question": q.Question,
+			},
+		})
+	}
+	if len(buttons) <= 4 && labelRunes <= askQuestionInlineButtonRunes {
+		cb.Buttons(buttons...)
+	} else {
+		for _, btn := range buttons {
+			cb.Buttons(btn)
+		}
+	}
+	cb.Note(e.i18n.T(MsgAskQuestionNote))
+	return cb.Build()
+}
+
 // sendAskQuestionPrompt renders one question (by index) from the AskUserQuestion list.
 // qIdx is the 0-based index of the question to display.
 func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []UserQuestion, qIdx int, requestID ...string) {
@@ -12698,57 +12773,7 @@ func (e *Engine) sendAskQuestionPrompt(p Platform, replyCtx any, questions []Use
 
 	// Try card (Feishu/Lark)
 	if supportsCards(p) {
-		cb := NewCard().Title(e.i18n.T(MsgAskQuestionTitle)+titleSuffix, "blue")
-		body := "**" + q.Question + "**"
-		if q.MultiSelect {
-			// For multiSelect, buttons would resolve on the first click and prevent
-			// selecting multiple options. Render options as a numbered text list
-			// instead, and instruct the user to reply with comma-separated numbers.
-			body += e.i18n.T(MsgAskQuestionMulti) + "\n\n"
-			for i, opt := range q.Options {
-				body += fmt.Sprintf("%d. **%s**", i+1, opt.Label)
-				if opt.Description != "" {
-					body += " — " + opt.Description
-				}
-				body += "\n"
-			}
-			cb.Markdown(body)
-			cb.Note(e.i18n.T(MsgAskQuestionNoteMulti))
-		} else {
-			// Single-select path. Issue #1658: rendering each option as a
-			// column_set row (description column + button column) looked right
-			// on Feishu desktop but the button clicks never dispatched on
-			// Feishu mobile, and even on desktop the column_set > column >
-			// button layout was reported as unreliable. Permission cards use a
-			// flat action row (tag:"action") and their cmd: clicks dispatch
-			// reliably on both desktop and mobile. So mirror that pattern:
-			// description as markdown, then a per-option action row with a
-			// single button. Each click carries the askq:qIdx:optIdx value
-			// plus askq_label/askq_question extras so the Feishu callback
-			// handler can render the post-answer card. The Note still tells
-			// users how to fall back to numeric/text input if their client
-			// happens to ignore the button row.
-			cb.Markdown(body)
-			for i, opt := range q.Options {
-				desc := opt.Label
-				if opt.Description != "" {
-					desc += " — " + opt.Description
-				}
-				answerData := answerValue(i + 1)
-				cb.Markdown("**" + desc + "**")
-				cb.Buttons(CardButton{
-					Text:  opt.Label,
-					Type:  "primary",
-					Value: answerData,
-					Extra: map[string]string{
-						"askq_label":    opt.Label,
-						"askq_question": q.Question,
-					},
-				})
-			}
-			cb.Note(e.i18n.T(MsgAskQuestionNote))
-		}
-		e.sendWithCard(p, replyCtx, cb.Build())
+		e.sendWithCard(p, replyCtx, e.buildAskQuestionCard(q, titleSuffix, answerValue))
 		return
 	}
 

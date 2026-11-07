@@ -6754,14 +6754,54 @@ func TestSendAskQuestionPrompt_CardPlatform_SingleSelectUsesActionRows(t *testin
 			sawCardListItem = true
 		}
 	}
-	if actionRows != 3 {
-		t.Errorf("expected 3 CardActions rows (one per option), got %d", actionRows)
+	// Short labels share one flat action row (like permission cards).
+	if actionRows != 1 {
+		t.Errorf("expected 1 CardActions row for short labels, got %d", actionRows)
 	}
 	if askqButtons != 3 {
 		t.Errorf("expected 3 askq buttons in action rows, got %d", askqButtons)
 	}
 	if sawCardListItem {
 		t.Errorf("CardListItem must not be used for single-select AskUserQuestion on Feishu (issue #1658)")
+	}
+}
+
+// Long labels get one flat action row per option so they stay readable on a
+// phone; descriptions are listed once in the body, not repeated per button.
+func TestSendAskQuestionPrompt_CardPlatform_LongLabelsOneButtonPerRow(t *testing.T) {
+	e := newTestEngine()
+	p := &stubCardPlatform{stubPlatformEngine: stubPlatformEngine{n: "feishu"}}
+	qs := []UserQuestion{{Question: "怎么处理这节课？", Options: []UserQuestionOption{
+		{Label: "删除课节和老师上报记录", Description: "软删除"},
+		{Label: "只取消关联会议", Description: "课节保留"},
+		{Label: "暂不处理，等班主任确认"},
+	}}}
+	e.sendAskQuestionPrompt(p, "ctx", qs, 0)
+	if len(p.sentCards) != 1 {
+		t.Fatalf("expected 1 card, got %d", len(p.sentCards))
+	}
+	var rows, markdowns int
+	var body string
+	for _, elem := range p.sentCards[0].Elements {
+		switch el := elem.(type) {
+		case CardActions:
+			rows++
+			if len(el.Buttons) != 1 {
+				t.Errorf("expected one button per row, got %d", len(el.Buttons))
+			}
+			if rows == 1 && el.Buttons[0].Type != "primary" {
+				t.Errorf("first option should be the primary button, got %q", el.Buttons[0].Type)
+			}
+		case CardMarkdown:
+			markdowns++
+			body = el.Content
+		}
+	}
+	if rows != 3 {
+		t.Errorf("expected 3 action rows, got %d", rows)
+	}
+	if markdowns != 1 || !strings.Contains(body, "软删除") || !strings.Contains(body, "怎么处理这节课？") {
+		t.Errorf("expected one markdown block with question and descriptions, got %d: %q", markdowns, body)
 	}
 }
 

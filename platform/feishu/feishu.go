@@ -1002,11 +1002,18 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		if answerLabel == "" {
 			answerLabel = actionVal
 		}
+		// Anyone in the chat may answer, so the answered card shows who chose.
 		cb := core.NewCard().Title("✅ "+answerLabel, "green")
+		body := ""
 		if askqQuestion != "" {
-			cb.Markdown(askqQuestion)
+			body = "<font color='grey'>" + askqQuestion + "</font>\n"
 		}
-		cb.Markdown("**→ " + answerLabel + "**")
+		if userID != "" {
+			body += "<at id=" + userID + "></at> → **" + answerLabel + "**"
+		} else {
+			body += "→ **" + answerLabel + "**"
+		}
+		cb.Markdown(body)
 		return &callback.CardActionTriggerResponse{
 			Card: &callback.Card{
 				Type: "raw",
