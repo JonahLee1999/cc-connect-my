@@ -981,7 +981,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		return &callback.CardActionTriggerResponse{
 			Card: &callback.Card{
 				Type: "raw",
-				Data: renderCardMap(cb.Build(), sessionKey),
+				Data: markCardShared(renderCardMap(cb.Build(), sessionKey)),
 			},
 		}, nil
 	}
@@ -1017,7 +1017,7 @@ func (p *Platform) onCardAction(event *callback.CardActionTriggerEvent) (*callba
 		return &callback.CardActionTriggerResponse{
 			Card: &callback.Card{
 				Type: "raw",
-				Data: renderCardMap(cb.Build(), sessionKey),
+				Data: markCardShared(renderCardMap(cb.Build(), sessionKey)),
 			},
 		}, nil
 	}

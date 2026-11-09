@@ -97,6 +97,9 @@ func renderCardMap(card *core.Card, sessionKey string) map[string]any {
 	if card == nil {
 		return result
 	}
+	if hasSharedDecisionButtons(card) {
+		markCardShared(result)
+	}
 
 	if card.Header != nil && card.Header.Title != "" {
 		color := card.Header.Color
@@ -461,4 +464,36 @@ func renderCard(card *core.Card, sessionKey string) string {
 		return `{"config":{"wide_screen_mode":true},"elements":[]}`
 	}
 	return string(b)
+}
+
+// Question (askq:) and permission (perm:) cards are answered by one person
+// for everyone in the chat. JSON 1.0 cards default to update_multi=false
+// ("exclusive" cards): a callback update would then show only to the person
+// who clicked, while everyone else keeps seeing the open question. Such cards,
+// and the answered cards that replace them, are therefore marked shared.
+func hasSharedDecisionButtons(card *core.Card) bool {
+	for _, el := range card.Elements {
+		actions, ok := el.(core.CardActions)
+		if !ok {
+			continue
+		}
+		for _, btn := range actions.Buttons {
+			if strings.HasPrefix(btn.Value, "askq:") || strings.HasPrefix(btn.Value, "perm:") {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// markCardShared sets config.update_multi so card updates show to every
+// recipient, not only to the person who clicked.
+func markCardShared(cardMap map[string]any) map[string]any {
+	cfg, _ := cardMap["config"].(map[string]any)
+	if cfg == nil {
+		cfg = map[string]any{}
+		cardMap["config"] = cfg
+	}
+	cfg["update_multi"] = true
+	return cardMap
 }
