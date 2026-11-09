@@ -39,6 +39,14 @@ func TestBuildMessageFilterInput(t *testing.T) {
 	if !in.IsFollowUp || !in.HasAttachments {
 		t.Fatalf("follow-up message: %+v", in)
 	}
+	mentioned := &core.Message{SessionKey: "feishu:oc_1:root:om_root", MessageID: "om_4",
+		ReplyCtx: replyContext{chatID: "oc_1", botMentioned: true}}
+	if in = buildMessageFilterInput("feishu", mentioned); !in.BotMentioned {
+		t.Fatalf("bot mention not passed to the filter: %+v", in)
+	}
+	if in = buildMessageFilterInput("feishu", root); in.BotMentioned {
+		t.Fatalf("unmentioned message reported as mentioned: %+v", in)
+	}
 	p2p := &core.Message{SessionKey: "feishu:oc_2:ou_a", MessageID: "om_3"}
 	if in = buildMessageFilterInput("feishu", p2p); in.IsThread || in.IsFollowUp {
 		t.Fatalf("p2p message: %+v", in)

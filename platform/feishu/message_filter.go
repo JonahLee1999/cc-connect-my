@@ -46,6 +46,7 @@ type messageFilterInput struct {
 	UserName       string `json:"user_name,omitempty"`
 	Text           string `json:"text"`
 	HasAttachments bool   `json:"has_attachments"`
+	BotMentioned   bool   `json:"bot_mentioned"` // the message @-mentions this bot
 }
 
 type messageFilterOutput struct {
@@ -91,6 +92,7 @@ func buildMessageFilterInput(platform string, msg *core.Message) messageFilterIn
 	}
 	if rc, ok := msg.ReplyCtx.(replyContext); ok {
 		in.ChatID = rc.chatID
+		in.BotMentioned = rc.botMentioned
 	}
 	if parts := strings.SplitN(msg.SessionKey, ":", 3); len(parts) == 3 {
 		if root, ok := parseThreadRootID(parts[2]); ok {

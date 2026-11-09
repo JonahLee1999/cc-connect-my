@@ -114,6 +114,7 @@ type replyContext struct {
 	receiptEmoji     string // persistent reaction owned by the accepted-message callback
 	receiptMessageID string
 	fromCardAction   bool // set for card button clicks; they bypass message_filter_cmd and chat context
+	botMentioned     bool // the message @-mentions this bot (passed to message_filter_cmd)
 }
 
 type Platform struct {
@@ -1964,7 +1965,7 @@ func (p *Platform) onMessage(ctx context.Context, event *larkim.P2MessageReceive
 	mentions := msg.Mentions
 	parentID := stringValue(msg.ParentId)
 
-	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey}
+	rctx := replyContext{messageID: messageID, chatID: chatID, sessionKey: sessionKey, botMentioned: botMentioned}
 	var groupHistoryCtx groupHistoryContext
 	if p.groupChatHistoryShare && chatType == "group" && !p.groupReplyAll && botOpenID != "" && (botMentioned || atEveryone) {
 		scope := p.groupHistoryScope(msg, chatID)
