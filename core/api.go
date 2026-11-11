@@ -54,6 +54,7 @@ type SendRequest struct {
 	WorkDir    string            `json:"work_dir,omitempty"`
 	CWD        string            `json:"cwd,omitempty"`
 	TTSText    string            `json:"tts_text,omitempty"`
+	TTSVoice   string            `json:"tts_voice,omitempty"` // optional voice for this message only
 	Images     []ImageAttachment `json:"images,omitempty"`
 	Files      []FileAttachment  `json:"files,omitempty"`
 	Audios     []FileAttachment  `json:"audios,omitempty"`
@@ -274,7 +275,7 @@ func (s *APIServer) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if strings.TrimSpace(req.TTSText) != "" {
-		if err := engine.SendTTSToSession(req.SessionKey, req.TTSText); err != nil {
+		if err := engine.SendTTSToSession(req.SessionKey, req.TTSText, req.TTSVoice); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}

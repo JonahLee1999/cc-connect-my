@@ -110,6 +110,12 @@ func parseSendArgs(args []string) (core.SendRequest, string, error) {
 			}
 			i++
 			req.TTSText = args[i]
+		case "--voice":
+			if i+1 >= len(args) {
+				return req, "", fmt.Errorf("%s requires a value", args[i])
+			}
+			i++
+			req.TTSVoice = args[i]
 		case "--image":
 			if i+1 >= len(args) {
 				return req, "", fmt.Errorf("--image requires a path")
@@ -375,6 +381,8 @@ Options:
       --cwd <path>         Start a new session in this working directory
       --work-dir <path>    Alias for --cwd
       --tts <text>         Synthesize text and send it as a voice/audio message
+      --voice <name|id>    Voice for this --tts message only: a preset name, a voice ID,
+                           or a name to search (Fish Audio); falls back to the default
       --image <path>       Send an image attachment (repeatable)
       --file <path>        Send a file attachment (repeatable)
       --audio <path>       Send an audio attachment (repeatable)

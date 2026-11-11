@@ -398,6 +398,8 @@ type Engine struct {
 
 	ttsSaveFunc      func(mode string) error
 	ttsVoiceSaveFunc func(voice string) error
+	ttsVoiceCacheMu  sync.Mutex
+	ttsVoiceCache    map[string]string // per-message voice name -> searched voice ID ("" = no match)
 
 	commandSaveAddFunc func(name, description, prompt, exec, workDir string) error
 	commandSaveDelFunc func(name string) error
@@ -12461,7 +12463,8 @@ func normalizeSendWorkDir(workDir, base string) (string, error) {
 
 // SendTTSToSession synthesizes and sends a voice message to an active session.
 // It is used by the local API/CLI so agents can call `cc-connect send --tts`.
-func (e *Engine) SendTTSToSession(sessionKey, text string) error {
+// voice optionally names the voice for this message only (see resolveTTSVoice).
+func (e *Engine) SendTTSToSession(sessionKey, text string, voice ...string) error {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return fmt.Errorf("tts text is required")
@@ -12470,7 +12473,70 @@ func (e *Engine) SendTTSToSession(sessionKey, text string) error {
 	if err != nil {
 		return err
 	}
-	return e.synthesizeAndSendTTS(p, replyCtx, text)
+	override := ""
+	if len(voice) > 0 {
+		override = e.resolveTTSVoice(voice[0])
+	}
+	return e.synthesizeAndSendTTS(p, replyCtx, text, override)
+}
+
+// resolveTTSVoice maps a per-message voice name to a voice ID: a configured
+// preset, a raw 32-hex voice ID, or — when the provider can search — the most
+// used public voice whose title contains the name. "" means "use the default
+// voice". Search results (including misses) are cached for the process.
+func (e *Engine) resolveTTSVoice(name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" || e.tts == nil {
+		return ""
+	}
+	if id, ok := e.tts.Presets[name]; ok {
+		return id
+	}
+	for preset, id := range e.tts.Presets {
+		if strings.EqualFold(preset, name) {
+			return id
+		}
+	}
+	if isHexVoiceID(name) {
+		return name
+	}
+	searcher, ok := e.tts.TTS.(VoiceSearcher)
+	if !ok {
+		return ""
+	}
+	e.ttsVoiceCacheMu.Lock()
+	if id, hit := e.ttsVoiceCache[name]; hit {
+		e.ttsVoiceCacheMu.Unlock()
+		return id
+	}
+	e.ttsVoiceCacheMu.Unlock()
+	ctx, cancel := context.WithTimeout(e.ctx, 15*time.Second)
+	defer cancel()
+	id, title, err := searcher.SearchVoice(ctx, name)
+	if err != nil {
+		slog.Warn("tts: voice search failed, using default voice", "name", name, "error", err)
+		return ""
+	}
+	slog.Info("tts: voice search", "name", name, "voice", id, "title", title)
+	e.ttsVoiceCacheMu.Lock()
+	if e.ttsVoiceCache == nil {
+		e.ttsVoiceCache = make(map[string]string)
+	}
+	e.ttsVoiceCache[name] = id
+	e.ttsVoiceCacheMu.Unlock()
+	return id
+}
+
+func isHexVoiceID(s string) bool {
+	if len(s) != 32 {
+		return false
+	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return false
+		}
+	}
+	return true
 }
 
 // SendAudiosToSession routes outbound audio attachments to the
@@ -16904,7 +16970,7 @@ func (e *Engine) sendTTSReply(p Platform, replyCtx any, text string) {
 	}
 }
 
-func (e *Engine) synthesizeAndSendTTS(p Platform, replyCtx any, text string) error {
+func (e *Engine) synthesizeAndSendTTS(p Platform, replyCtx any, text string, voiceOverride ...string) error {
 	if e.tts == nil || !e.tts.Enabled {
 		return fmt.Errorf("tts is not configured")
 	}
@@ -16919,6 +16985,9 @@ func (e *Engine) synthesizeAndSendTTS(p Platform, replyCtx any, text string) err
 		return fmt.Errorf("platform %s does not support audio sending", p.Name())
 	}
 	voice := e.tts.GetVoice()
+	if len(voiceOverride) > 0 && voiceOverride[0] != "" {
+		voice = voiceOverride[0]
+	}
 	slog.Info("tts: starting synthesis", "voice", voice, "speed", e.tts.Speed, "text_len", len(text))
 	opts := TTSSynthesisOpts{
 		Voice:        voice,

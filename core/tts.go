@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -317,6 +318,15 @@ func (o *OpenAITTS) Synthesize(ctx context.Context, text string, opts TTSSynthes
 	return mp3Data, "mp3", nil
 }
 
+// VoiceSearcher is implemented by TTS providers that can look up a voice by
+// name (e.g. a public voice library), used when a per-message voice is not a
+// configured preset.
+type VoiceSearcher interface {
+	// SearchVoice returns the best voice ID matching name and its title, or
+	// "" when nothing matches.
+	SearchVoice(ctx context.Context, name string) (id, title string, err error)
+}
+
 // ──────────────────────────────────────────────────────────────
 // FishTTS — Fish Audio TTS implementation
 // ──────────────────────────────────────────────────────────────
@@ -392,6 +402,48 @@ func (f *FishTTS) Synthesize(ctx context.Context, text string, opts TTSSynthesis
 	}
 	return audio, "mp3", nil
 }
+
+// SearchVoice looks up public Fish Audio voices by title, most used first, and
+// returns the first one whose title contains name (case-insensitive).
+func (f *FishTTS) SearchVoice(ctx context.Context, name string) (string, string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", "", nil
+	}
+	q := url.Values{"title": {name}, "page_size": {"10"}, "sort_by": {"task_count"}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(f.BaseURL, "/")+"/model?"+q.Encode(), nil)
+	if err != nil {
+		return "", "", fmt.Errorf("fish voice search: create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.APIKey)
+	resp, err := f.Client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("fish voice search: request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return "", "", fmt.Errorf("fish voice search API %d: %s", resp.StatusCode, body)
+	}
+	var out struct {
+		Items []struct {
+			ID    string `json:"_id"`
+			Title string `json:"title"`
+		} `json:"items"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", "", fmt.Errorf("fish voice search: decode: %w", err)
+	}
+	lower := strings.ToLower(name)
+	for _, it := range out.Items {
+		if it.ID != "" && strings.Contains(strings.ToLower(it.Title), lower) {
+			return it.ID, it.Title, nil
+		}
+	}
+	return "", "", nil
+}
+
+var _ VoiceSearcher = (*FishTTS)(nil)
 
 // ──────────────────────────────────────────────────────────────
 // MiniMaxTTS — MiniMax T2A v2 TTS implementation
