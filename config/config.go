@@ -297,6 +297,7 @@ type TTSConfig struct {
 	TTSMode      string                    `toml:"tts_mode"`      // "voice_only" (default) | "always"
 	MaxTextLen   int                       `toml:"max_text_len"`  // max rune count before skipping TTS; 0 = no limit
 	Agents       map[string]TTSAgentConfig `toml:"agents"`        // per-project/agent voice overrides keyed by [[projects]].name
+	Presets      map[string]string         `toml:"presets"`       // voice presets for /tts voice: display name -> voice ID
 	OpenAI       struct {
 		APIKey  string `toml:"api_key"`
 		BaseURL string `toml:"base_url"`
@@ -1911,6 +1912,13 @@ func SaveTTSMode(mode string) error {
 	configMu.Lock()
 	defer configMu.Unlock()
 	return patchSectionField("tts", "tts_mode", quoteTomlString(mode))
+}
+
+// SaveTTSVoice persists the default voice chosen with /tts voice.
+func SaveTTSVoice(voice string) error {
+	configMu.Lock()
+	defer configMu.Unlock()
+	return patchSectionField("tts", "voice", quoteTomlString(voice))
 }
 
 // GetProjectProviders returns providers for a given project.

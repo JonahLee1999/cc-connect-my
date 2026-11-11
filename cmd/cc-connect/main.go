@@ -903,10 +903,12 @@ func main() {
 				}
 			}
 			if ttsCfg.TTS != nil {
+				ttsCfg.Presets = cfg.TTS.Presets
 				engine.SetTTSConfig(ttsCfg)
 				engine.SetTTSSaveFunc(func(mode string) error {
 					return config.SaveTTSMode(mode)
 				})
+				engine.SetTTSVoiceSaveFunc(config.SaveTTSVoice)
 				slog.Info("tts: enabled", "provider", ttsCfg.Provider, "voice", ttsCfg.Voice, "mode", initMode)
 			}
 		}

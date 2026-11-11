@@ -396,7 +396,8 @@ type Engine struct {
 	listGlobalProvidersFunc func(agentType string) ([]ProviderConfig, error)
 	modelSaveFunc           func(model string) error
 
-	ttsSaveFunc func(mode string) error
+	ttsSaveFunc      func(mode string) error
+	ttsVoiceSaveFunc func(voice string) error
 
 	commandSaveAddFunc func(name, description, prompt, exec, workDir string) error
 	commandSaveDelFunc func(name string) error
@@ -955,6 +956,11 @@ func (e *Engine) SetTTSSaveFunc(fn func(mode string) error) {
 	e.ttsSaveFunc = fn
 }
 
+// SetTTSVoiceSaveFunc persists voice switches made with /tts voice.
+func (e *Engine) SetTTSVoiceSaveFunc(fn func(voice string) error) {
+	e.ttsVoiceSaveFunc = fn
+}
+
 // SetDisplayConfig overrides the default truncation settings.
 func (e *Engine) SetDisplayConfig(cfg DisplayCfg) {
 	e.display = cfg
@@ -1368,6 +1374,9 @@ func isPrivilegedCommandInvocation(cmdID string, args []string) bool {
 		return matchSubCommand(sub, []string{
 			"add", "addexec", "list", "del", "delete", "rm", "remove", "enable", "disable", "mute", "unmute", "setup",
 		}) == "addexec"
+	case "tts":
+		// Listing voices is open; switching the shared voice is admin only.
+		return sub == "voice" && len(args) > 1
 	default:
 		return false
 	}
@@ -11111,6 +11120,8 @@ func (e *Engine) cmdTTS(p Platform, msg *Message, args []string) {
 		return
 	}
 	switch args[0] {
+	case "voice":
+		e.cmdTTSVoice(p, msg, args[1:])
 	case "always", "voice_only":
 		mode := args[0]
 		e.tts.SetTTSMode(mode)
@@ -11123,6 +11134,51 @@ func (e *Engine) cmdTTS(p Platform, msg *Message, args []string) {
 	default:
 		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgTTSUsage))
 	}
+}
+
+// cmdTTSVoice lists the voice presets (/tts voice) or switches the voice
+// (/tts voice <preset name or voice ID>; admin only, see
+// isPrivilegedCommandInvocation).
+func (e *Engine) cmdTTSVoice(p Platform, msg *Message, args []string) {
+	current := e.tts.GetVoice()
+	if len(args) == 0 {
+		names := make([]string, 0, len(e.tts.Presets))
+		for name := range e.tts.Presets {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		var b strings.Builder
+		for _, name := range names {
+			mark := "- "
+			if e.tts.Presets[name] == current {
+				mark = "- ✅ "
+			}
+			b.WriteString(mark + name + "\n")
+		}
+		label := e.tts.VoiceName(current)
+		if label == "" {
+			label = current
+		}
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgTTSVoiceList), label, strings.TrimRight(b.String(), "\n")))
+		return
+	}
+	arg := strings.Join(args, " ")
+	voice, ok := e.tts.ResolveVoice(arg)
+	if !ok {
+		e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgTTSVoiceUnknown), arg))
+		return
+	}
+	e.tts.SetVoice(voice)
+	if e.ttsVoiceSaveFunc != nil {
+		if err := e.ttsVoiceSaveFunc(voice); err != nil {
+			slog.Warn("tts: failed to persist voice", "error", err)
+		}
+	}
+	label := e.tts.VoiceName(voice)
+	if label == "" {
+		label = voice
+	}
+	e.reply(p, msg.ReplyCtx, fmt.Sprintf(e.i18n.T(MsgTTSVoiceSwitched), label))
 }
 
 func (e *Engine) cmdStop(p Platform, msg *Message) {
@@ -16856,9 +16912,10 @@ func (e *Engine) synthesizeAndSendTTS(p Platform, replyCtx any, text string) err
 	if !ok {
 		return fmt.Errorf("platform %s does not support audio sending", p.Name())
 	}
-	slog.Info("tts: starting synthesis", "voice", e.tts.Voice, "speed", e.tts.Speed, "text_len", len(text))
+	voice := e.tts.GetVoice()
+	slog.Info("tts: starting synthesis", "voice", voice, "speed", e.tts.Speed, "text_len", len(text))
 	opts := TTSSynthesisOpts{
-		Voice:        e.tts.Voice,
+		Voice:        voice,
 		LanguageType: e.tts.LanguageType,
 		Speed:        e.tts.Speed,
 	}

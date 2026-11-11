@@ -291,10 +291,13 @@ const (
 	MsgVoiceTranscribeFailed         MsgKey = "voice_transcribe_failed"
 	MsgVoiceEmpty                    MsgKey = "voice_empty"
 
-	MsgTTSNotEnabled MsgKey = "tts_not_enabled"
-	MsgTTSStatus     MsgKey = "tts_status"
-	MsgTTSSwitched   MsgKey = "tts_switched"
-	MsgTTSUsage      MsgKey = "tts_usage"
+	MsgTTSNotEnabled    MsgKey = "tts_not_enabled"
+	MsgTTSStatus        MsgKey = "tts_status"
+	MsgTTSSwitched      MsgKey = "tts_switched"
+	MsgTTSUsage         MsgKey = "tts_usage"
+	MsgTTSVoiceList     MsgKey = "tts_voice_list"
+	MsgTTSVoiceSwitched MsgKey = "tts_voice_switched"
+	MsgTTSVoiceUnknown  MsgKey = "tts_voice_unknown"
 
 	MsgHeartbeatNotAvailable MsgKey = "heartbeat_not_available"
 	MsgHeartbeatStatus       MsgKey = "heartbeat_status"
@@ -1783,11 +1786,32 @@ var messages = map[MsgKey]map[Language]string{
 		LangSpanish:            "Modo TTS cambiado a: %s",
 	},
 	MsgTTSUsage: {
-		LangEnglish:            "Usage: /tts [always|voice_only]",
-		LangChinese:            "用法：/tts [always|voice_only]",
-		LangTraditionalChinese: "用法：/tts [always|voice_only]",
-		LangJapanese:           "使い方: /tts [always|voice_only]",
-		LangSpanish:            "Uso: /tts [always|voice_only]",
+		LangEnglish:            "Usage: /tts [always|voice_only] | /tts voice [name]",
+		LangChinese:            "用法：/tts [always|voice_only] | /tts voice [音色名]",
+		LangTraditionalChinese: "用法：/tts [always|voice_only] | /tts voice [音色名]",
+		LangJapanese:           "使い方: /tts [always|voice_only] | /tts voice [音声名]",
+		LangSpanish:            "Uso: /tts [always|voice_only] | /tts voice [nombre]",
+	},
+	MsgTTSVoiceList: {
+		LangEnglish:            "🔊 Current voice: %s\n\nPresets:\n%s\n\nSwitch with /tts voice <name> (or a voice ID).",
+		LangChinese:            "🔊 当前音色：%s\n\n可选音色：\n%s\n\n切换：/tts voice <音色名>（也可以填音色 ID）",
+		LangTraditionalChinese: "🔊 目前音色：%s\n\n可選音色：\n%s\n\n切換：/tts voice <音色名>（也可以填音色 ID）",
+		LangJapanese:           "🔊 現在の音声: %s\n\nプリセット:\n%s\n\n切り替え: /tts voice <名前>（音声 ID も可）",
+		LangSpanish:            "🔊 Voz actual: %s\n\nPredefinidas:\n%s\n\nCambiar con /tts voice <nombre> (o un ID de voz).",
+	},
+	MsgTTSVoiceSwitched: {
+		LangEnglish:            "🔊 Voice switched to: %s",
+		LangChinese:            "🔊 已切换音色：%s",
+		LangTraditionalChinese: "🔊 已切換音色：%s",
+		LangJapanese:           "🔊 音声を切り替えました: %s",
+		LangSpanish:            "🔊 Voz cambiada a: %s",
+	},
+	MsgTTSVoiceUnknown: {
+		LangEnglish:            "Unknown voice: %s. Send /tts voice to see the presets.",
+		LangChinese:            "没有这个音色：%s。发送 /tts voice 查看可选音色。",
+		LangTraditionalChinese: "沒有這個音色：%s。發送 /tts voice 查看可選音色。",
+		LangJapanese:           "不明な音声: %s。/tts voice でプリセットを確認してください。",
+		LangSpanish:            "Voz desconocida: %s. Envía /tts voice para ver las predefinidas.",
 	},
 	MsgHeartbeatNotAvailable: {
 		LangEnglish:            "Heartbeat is not configured for this project.",

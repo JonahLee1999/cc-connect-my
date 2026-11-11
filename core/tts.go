@@ -38,9 +38,56 @@ type TTSCfg struct {
 	Speed        float64 // speaking speed multiplier; 0 = provider default
 	TTS          TextToSpeech
 	MaxTextLen   int // max rune count before skipping TTS; 0 = no limit
+	// Presets maps display names to provider voice IDs for `/tts voice <name>`.
+	Presets map[string]string
 
 	mu      sync.RWMutex
 	ttsMode string // "voice_only" (default) | "always"
+}
+
+// GetVoice returns the current default voice safely.
+func (c *TTSCfg) GetVoice() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.Voice
+}
+
+// SetVoice switches the default voice safely.
+func (c *TTSCfg) SetVoice(voice string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.Voice = voice
+}
+
+// VoiceName returns the preset name for voice, or "" when it is not a preset.
+func (c *TTSCfg) VoiceName(voice string) string {
+	for name, id := range c.Presets {
+		if id == voice {
+			return name
+		}
+	}
+	return ""
+}
+
+// ResolveVoice maps a preset name (case-insensitive) or a raw voice ID to a
+// voice ID. A raw ID is accepted only when it looks like one (no spaces).
+func (c *TTSCfg) ResolveVoice(arg string) (string, bool) {
+	arg = strings.TrimSpace(arg)
+	if arg == "" {
+		return "", false
+	}
+	if id, ok := c.Presets[arg]; ok {
+		return id, true
+	}
+	for name, id := range c.Presets {
+		if strings.EqualFold(name, arg) {
+			return id, true
+		}
+	}
+	if !strings.ContainsAny(arg, " \t") && len(arg) >= 8 {
+		return arg, true
+	}
+	return "", false
 }
 
 // GetTTSMode returns the current TTS mode safely.
