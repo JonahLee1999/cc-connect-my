@@ -855,6 +855,21 @@ func main() {
 				} else {
 					slog.Warn("tts: mimo provider enabled but api_key is empty")
 				}
+			case "fish":
+				apiKey := strings.TrimSpace(cfg.TTS.Fish.APIKey)
+				if apiKey == "" && cfg.TTS.Fish.APIKeyFile != "" {
+					if b, err := os.ReadFile(cfg.TTS.Fish.APIKeyFile); err != nil {
+						slog.Warn("tts: fish api_key_file unreadable", "path", cfg.TTS.Fish.APIKeyFile, "error", err)
+					} else {
+						apiKey = strings.TrimSpace(string(b))
+					}
+				}
+				if apiKey != "" {
+					ttsCfg.TTS = core.NewFishTTS(apiKey, cfg.TTS.Fish.BaseURL, cfg.TTS.Fish.Model, nil)
+					ttsCfg.Provider = "fish"
+				} else {
+					slog.Warn("tts: fish provider enabled but api_key is empty")
+				}
 			case "espeak":
 				voice := ttsEffective.Voice
 				if voice == "" {

@@ -271,6 +271,82 @@ func (o *OpenAITTS) Synthesize(ctx context.Context, text string, opts TTSSynthes
 }
 
 // ──────────────────────────────────────────────────────────────
+// FishTTS — Fish Audio TTS implementation
+// ──────────────────────────────────────────────────────────────
+
+// FishTTS implements TextToSpeech using the Fish Audio API
+// (https://docs.fish.audio). The voice is a Fish Audio voice model ID
+// (reference_id); public community voices and your own cloned voices both work.
+type FishTTS struct {
+	APIKey  string
+	BaseURL string
+	Model   string // TTS backend model sent as the "model" header, e.g. "s1"
+	Client  *http.Client
+}
+
+// NewFishTTS creates a new FishTTS instance.
+func NewFishTTS(apiKey, baseURL, model string, client *http.Client) *FishTTS {
+	if baseURL == "" {
+		baseURL = "https://api.fish.audio"
+	}
+	if model == "" {
+		model = "s1"
+	}
+	if client == nil {
+		client = &http.Client{Timeout: 60 * time.Second}
+	}
+	return &FishTTS{APIKey: apiKey, BaseURL: baseURL, Model: model, Client: client}
+}
+
+// Synthesize sends text to Fish Audio and returns MP3 audio bytes. opts.Voice
+// is the voice model ID; empty uses Fish Audio's default voice.
+func (f *FishTTS) Synthesize(ctx context.Context, text string, opts TTSSynthesisOpts) ([]byte, string, error) {
+	reqBody := map[string]any{
+		"text":    text,
+		"format":  "mp3",
+		"latency": "normal",
+	}
+	if opts.Voice != "" {
+		reqBody["reference_id"] = opts.Voice
+	}
+	if opts.Speed > 0 {
+		reqBody["prosody"] = map[string]any{"speed": opts.Speed}
+	}
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, "", fmt.Errorf("fish tts: marshal request: %w", err)
+	}
+
+	url := strings.TrimRight(f.BaseURL, "/") + "/v1/tts"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(jsonData))
+	if err != nil {
+		return nil, "", fmt.Errorf("fish tts: create request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+f.APIKey)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("model", f.Model)
+
+	resp, err := f.Client.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("fish tts: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return nil, "", fmt.Errorf("fish tts API %d: %s", resp.StatusCode, body)
+	}
+	audio, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("fish tts: read audio: %w", err)
+	}
+	if len(audio) == 0 {
+		return nil, "", fmt.Errorf("fish tts: empty audio")
+	}
+	return audio, "mp3", nil
+}
+
+// ──────────────────────────────────────────────────────────────
 // MiniMaxTTS — MiniMax T2A v2 TTS implementation
 // ──────────────────────────────────────────────────────────────
 

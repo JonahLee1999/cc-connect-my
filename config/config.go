@@ -289,7 +289,7 @@ type SpeechConfig struct {
 // TTSConfig configures text-to-speech output (mirrors SpeechConfig style).
 type TTSConfig struct {
 	Enabled      bool                      `toml:"enabled"`
-	Provider     string                    `toml:"provider"`      // "qwen" | "openai" | "minimax" | "mimo" | "espeak" | "pico" | "edge"
+	Provider     string                    `toml:"provider"`      // "qwen" | "openai" | "minimax" | "mimo" | "fish" | "espeak" | "pico" | "edge"
 	Voice        string                    `toml:"voice"`         // default voice name (for edge: "zh-CN-XiaoxiaoNeural"; for pico: "zh-CN"; for espeak: "zh"; for mimo: "mimo_default" / "冰糖" / "Mia" …)
 	VoiceID      string                    `toml:"voice_id"`      // alias for voice; useful for MiniMax voice IDs
 	Speed        float64                   `toml:"speed"`         // optional speaking speed multiplier; 0 = provider default
@@ -318,6 +318,12 @@ type TTSConfig struct {
 		BaseURL string `toml:"base_url"`
 		Model   string `toml:"model"`
 	} `toml:"mimo"`
+	Fish struct {
+		APIKey     string `toml:"api_key"`
+		APIKeyFile string `toml:"api_key_file"` // optional: read the key from this file instead of config.toml
+		BaseURL    string `toml:"base_url"`
+		Model      string `toml:"model"` // backend model header, default "s1"
+	} `toml:"fish"`
 }
 
 // TTSAgentConfig overrides global [tts] synthesis parameters for one project.
