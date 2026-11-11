@@ -8845,7 +8845,7 @@ func defaultShellFlag() string {
 // Strategy: start the command, wait 500ms. If it finishes within that window,
 // just send the result directly (no intermediate messages). If it's still running,
 // send a progress message and keep updating until completion.
-func (e *Engine) runShellWithProgress(p Platform, replyCtx any, command string, workDir string, timeout time.Duration, maxOutput int) error {
+func (e *Engine) runShellWithProgress(p Platform, replyCtx any, command string, workDir string, timeout time.Duration, maxOutput int, env ...string) error {
 	cmdLabel := truncateStr(command, 60)
 
 	ctx, cancel := context.WithTimeout(e.ctx, timeout)
@@ -8853,6 +8853,9 @@ func (e *Engine) runShellWithProgress(p Platform, replyCtx any, command string, 
 
 	cmd := shellExecCommand(ctx, e.shell, e.shellFlag, e.shellProfile, command)
 	cmd.Dir = workDir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -15833,7 +15836,10 @@ func (e *Engine) executeShellCommand(p Platform, msg *Message, cmd *CustomComman
 		workDir, _ = os.Getwd()
 	}
 
-	_ = e.runShellWithProgress(p, msg.ReplyCtx, execCmd, workDir, 60*time.Second, 4000)
+	// Tell the command where it was run from, like the agent env does, so
+	// exec commands can act on the current chat or session.
+	_ = e.runShellWithProgress(p, msg.ReplyCtx, execCmd, workDir, 60*time.Second, 4000,
+		"CC_PROJECT="+e.name, "CC_SESSION_KEY="+msg.SessionKey, "CC_USER_ID="+msg.UserID)
 }
 
 func (e *Engine) cmdCommands(p Platform, msg *Message, args []string) {
