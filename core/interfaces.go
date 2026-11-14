@@ -235,6 +235,13 @@ type TypingIndicatorDone interface {
 	AddDoneReaction(replyCtx any)
 }
 
+// MessageInjectionAcknowledger is an optional capability for acknowledging an
+// accepted mid-turn supplement on the original message instead of posting a
+// separate text reply. Implementations should keep network IO asynchronous.
+type MessageInjectionAcknowledger interface {
+	AcknowledgeMessageInjection(ctx context.Context, msg *Message)
+}
+
 // AtMentionSender is an optional interface for platforms that support @mention in
 // reply messages (e.g. DingTalk). Platforms that implement this interface can
 // include @user notifications when replying in group chats.

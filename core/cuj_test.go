@@ -41,6 +41,54 @@ import (
 	"time"
 )
 
+// CUJ: start work, send two supplements, and receive a single final reply.
+// Each supplement is acknowledged by a reaction rather than a chat message.
+func TestCUJ_A10_BusySupplementsUseReactionsWithoutExtraReplies(t *testing.T) {
+	p := &injectionReactionPlatform{stubPlatformEngine: &stubPlatformEngine{n: "test"}}
+	s := newMidTurnSession("supplement-reactions")
+	e := NewEngine("test", &resultAgent{session: s}, []Platform{p}, t.TempDir()+"/sessions.json", LangEnglish)
+	e.SetBusyAction(BusyActionInject)
+	t.Cleanup(func() { _ = e.Stop() })
+	send := func(id, content string) {
+		e.ReceiveMessage(p, &Message{SessionKey: "test:reaction-user", Platform: "test", UserID: "reaction-user", MessageID: id, Content: content, ReplyCtx: id})
+	}
+
+	// User action 1: start a task and wait until it reaches the live agent.
+	send("first", "start the task")
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		s.sendMu.Lock()
+		started := len(s.sendCalls) > 0
+		s.sendMu.Unlock()
+		if started {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("initial task did not reach agent")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// User actions 2 and 3: each supplement gets a reaction, with no extra
+	// chat message. The eventual answer remains the only text reply.
+	send("second", "also check the logs")
+	send("third", "include the result")
+	if got := fmt.Sprint(p.getReactions()); got != "[second third]" {
+		t.Fatalf("visible supplement reactions = %s", got)
+	}
+	if replies := p.getSent(); len(replies) != 0 {
+		t.Fatalf("unexpected intermediate replies: %v", replies)
+	}
+	s.events <- Event{Type: EventResult, Content: "task and supplements completed", Done: true}
+	replies := waitForPlatformSend(p.stubPlatformEngine, 1, 2*time.Second)
+	if len(replies) != 1 || replies[0] != "task and supplements completed" {
+		t.Fatalf("visible replies = %v", replies)
+	}
+	if got := fmt.Sprint(p.getReactions()); got != "[second third]" {
+		t.Fatalf("reactions changed after completion: %s", got)
+	}
+}
+
 // CUJ: submit work during slow startup, queue a follow-up while the agent is
 // working, then check status. Both messages have receipts before either answer;
 // draining the queue must preserve each receipt without adding another one.

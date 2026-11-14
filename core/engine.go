@@ -3549,7 +3549,11 @@ func (e *Engine) injectMessageIntoBusyTurn(p Platform, msg *Message, interactive
 		"user", msg.UserName,
 		"msg_id", msg.MessageID,
 	)
-	e.reply(p, msg.ReplyCtx, e.i18n.T(MsgMessageInjected))
+	if acknowledger, ok := p.(MessageInjectionAcknowledger); ok {
+		acknowledger.AcknowledgeMessageInjection(e.ctx, msg)
+	} else {
+		e.reply(p, msg.ReplyCtx, e.i18n.T(MsgMessageInjected))
+	}
 	return true
 }
 
